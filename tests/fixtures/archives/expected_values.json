@@ -1,0 +1,49 @@
+{
+  "sample.zip": {
+    "entry_count": 3,
+    "entries": [
+      "data.csv",
+      "image.jpg",
+      "notes.txt"
+    ],
+    "contained_categories": [
+      "tabular",
+      "image",
+      "document"
+    ],
+    "security_valid": true
+  },
+  "zip_slip.zip": {
+    "entry_count": 1,
+    "entries": [
+      "../../evil.txt"
+    ],
+    "security_valid": false,
+    "expected_error": "Path traversal entry detected"
+  },
+  "archive_bomb.zip": {
+    "entry_count": 1,
+    "declared_uncompressed_bytes": 734003200,
+    "security_valid": false,
+    "expected_error": "Declared uncompressed size"
+  },
+  "sample.tar": {
+    "entry_count": 2,
+    "entries": [
+      "data.csv",
+      "notes.txt"
+    ],
+    "contained_categories": [
+      "tabular",
+      "document"
+    ],
+    "security_valid": true
+  },
+  "sample.gz": {
+    "entry_count": 1,
+    "entries": [
+      "sample"
+    ],
+    "security_valid": true
+  }
+}

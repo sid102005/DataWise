@@ -1,0 +1,402 @@
+[
+  {
+    "Customer_ID": 1001,
+    "Name": "Alice Smith",
+    "Age": 34.0,
+    "Date": "2024-01-15",
+    "Purchase": 9850.5,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1002,
+    "Name": "Bob Jones",
+    "Age": 45.0,
+    "Date": "2024-01-18",
+    "Purchase": 9420.0,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1003,
+    "Name": "Charlie Brown",
+    "Age": 29.0,
+    "Date": "2024-01-22",
+    "Purchase": 8900.25,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1004,
+    "Name": "Diana Prince",
+    "Age": 38.0,
+    "Date": "2024-02-01",
+    "Purchase": 8650.0,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1005,
+    "Name": "Evan Wright",
+    "Age": 52.0,
+    "Date": "2024-02-05",
+    "Purchase": 8200.75,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1006,
+    "Name": "Fiona Gallagher",
+    "Age": null,
+    "Date": "14/02/2024",
+    "Purchase": 6100.0,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1007,
+    "Name": "George Clark",
+    "Age": 41.0,
+    "Date": "2024-02-20",
+    "Purchase": 7950.0,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1008,
+    "Name": "Hannah Abbott",
+    "Age": 27.0,
+    "Date": "2024-02-28",
+    "Purchase": 7600.5,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1009,
+    "Name": "Ian Malcolm",
+    "Age": 48.0,
+    "Date": "2024-03-02",
+    "Purchase": 7350.0,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1010,
+    "Name": "Julia Roberts",
+    "Age": 31.0,
+    "Date": "2024-03-10",
+    "Purchase": 7100.25,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1011,
+    "Name": "Kevin Bacon",
+    "Age": 56.0,
+    "Date": "2024-03-15",
+    "Purchase": 6850.0,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1012,
+    "Name": "Laura Croft",
+    "Age": 33.0,
+    "Date": "21/03/2024",
+    "Purchase": 5950.0,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1013,
+    "Name": "Michael Scott",
+    "Age": null,
+    "Date": "2024-03-25",
+    "Purchase": 5400.5,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1014,
+    "Name": "Nancy Wheeler",
+    "Age": 22.0,
+    "Date": "2024-04-02",
+    "Purchase": 4800.0,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1015,
+    "Name": "Oscar Martinez",
+    "Age": 43.0,
+    "Date": "08/04/2024",
+    "Purchase": 5200.75,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1016,
+    "Name": "Pam Beesly",
+    "Age": 30.0,
+    "Date": "2024-04-12",
+    "Purchase": 4300.0,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1017,
+    "Name": "Quinn Fabray",
+    "Age": 24.0,
+    "Date": "2024-04-18",
+    "Purchase": 3950.25,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1018,
+    "Name": "Ryan Howard",
+    "Age": 28.0,
+    "Date": "25/04/2024",
+    "Purchase": 3600.0,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1019,
+    "Name": "Stanley Hudson",
+    "Age": null,
+    "Date": "2024-05-01",
+    "Purchase": 6450.0,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1020,
+    "Name": "Toby Flenderson",
+    "Age": 47.0,
+    "Date": "2024-05-05",
+    "Purchase": 2100.5,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1021,
+    "Name": "Ursula Buffay",
+    "Age": 36.0,
+    "Date": "12/05/2024",
+    "Purchase": 3150.0,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1022,
+    "Name": "Victor Vance",
+    "Age": 39.0,
+    "Date": "2024-05-18",
+    "Purchase": 4750.25,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1023,
+    "Name": "Wendy Darling",
+    "Age": 26.0,
+    "Date": "2024-05-22",
+    "Purchase": 3820.0,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1024,
+    "Name": "Xavier Woods",
+    "Age": 35.0,
+    "Date": "29/05/2024",
+    "Purchase": 4100.5,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1025,
+    "Name": "Yvonne Strahovski",
+    "Age": 37.0,
+    "Date": "2024-06-02",
+    "Purchase": 5300.0,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1012,
+    "Name": "Laura Croft",
+    "Age": 33.0,
+    "Date": "21/03/2024",
+    "Purchase": 5950.0,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1026,
+    "Name": "Zack Morris",
+    "Age": null,
+    "Date": "08/06/2024",
+    "Purchase": 2900.75,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1027,
+    "Name": "Arthur Dent",
+    "Age": 42.0,
+    "Date": "2024-06-15",
+    "Purchase": 4650.0,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1028,
+    "Name": "Beth Harmon",
+    "Age": 21.0,
+    "Date": "2024-06-20",
+    "Purchase": 6300.25,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1029,
+    "Name": "Charles Xavier",
+    "Age": 58.0,
+    "Date": "24/06/2024",
+    "Purchase": 5800.0,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1030,
+    "Name": "Donna Noble",
+    "Age": 39.0,
+    "Date": "2024-07-01",
+    "Purchase": 3400.5,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1031,
+    "Name": "Eleanor Shellstrop",
+    "Age": 33.0,
+    "Date": "05/07/2024",
+    "Purchase": 4950.0,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1032,
+    "Name": "Fox Mulder",
+    "Age": 40.0,
+    "Date": "2024-07-10",
+    "Purchase": 5650.75,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1033,
+    "Name": "Gillian Anderson",
+    "Age": 49.0,
+    "Date": "2024-07-16",
+    "Purchase": 3200.0,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1034,
+    "Name": "Hank Schrader",
+    "Age": null,
+    "Date": "22/07/2024",
+    "Purchase": 4450.25,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1014,
+    "Name": "Nancy Wheeler",
+    "Age": 22.0,
+    "Date": "2024-04-02",
+    "Purchase": 4800.0,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1035,
+    "Name": "Iris West",
+    "Age": 28.0,
+    "Date": "2024-08-01",
+    "Purchase": 2750.0,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1036,
+    "Name": "Jack Shephard",
+    "Age": 37.0,
+    "Date": "07/08/2024",
+    "Purchase": 6150.5,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1037,
+    "Name": "Kim Wexler",
+    "Age": 41.0,
+    "Date": "2024-08-14",
+    "Purchase": 5500.0,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1038,
+    "Name": "Luke Danes",
+    "Age": 44.0,
+    "Date": "2024-08-20",
+    "Purchase": 3850.75,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1039,
+    "Name": "Mona Lisa",
+    "Age": 25.0,
+    "Date": "26/08/2024",
+    "Purchase": 4250.0,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1040,
+    "Name": "Nathan Drake",
+    "Age": 36.0,
+    "Date": "2024-09-02",
+    "Purchase": 5100.25,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1041,
+    "Name": "Olivia Dunham",
+    "Age": 32.0,
+    "Date": "09/09/2024",
+    "Purchase": 4700.0,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1042,
+    "Name": "Peter Parker",
+    "Age": null,
+    "Date": "2024-09-15",
+    "Purchase": 1950.5,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1043,
+    "Name": "Quentin Coldwater",
+    "Age": 23.0,
+    "Date": "2024-09-21",
+    "Purchase": 2400.0,
+    "Region": "East"
+  },
+  {
+    "Customer_ID": 1016,
+    "Name": "Pam Beesly",
+    "Age": 30.0,
+    "Date": "2024-04-12",
+    "Purchase": 4300.0,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1044,
+    "Name": "Rose Tyler",
+    "Age": 27.0,
+    "Date": "28/09/2024",
+    "Purchase": 3300.75,
+    "Region": "West"
+  },
+  {
+    "Customer_ID": 1045,
+    "Name": "Sam Winchester",
+    "Age": 35.0,
+    "Date": "2024-10-04",
+    "Purchase": 4850.0,
+    "Region": "North"
+  },
+  {
+    "Customer_ID": 1046,
+    "Name": "Tara Maclay",
+    "Age": 24.0,
+    "Date": "11/10/2024",
+    "Purchase": 2600.25,
+    "Region": "South"
+  },
+  {
+    "Customer_ID": 1021,
+    "Name": "Ursula Buffay",
+    "Age": 36.0,
+    "Date": "12/05/2024",
+    "Purchase": 3150.0,
+    "Region": "North"
+  }
+]

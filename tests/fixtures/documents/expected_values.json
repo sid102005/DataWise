@@ -1,0 +1,50 @@
+{
+  "sample.txt": {
+    "text": "This is a plain text file.\nIt contains multiple lines of known text.\nWord count should be straightforward.",
+    "word_count": 18
+  },
+  "sample.md": {
+    "text": "# Main Heading\nThis is a markdown file with a heading.\n\n## Subheading\nHere is some more text.\n",
+    "word_count": 18,
+    "headings": [
+      "Main Heading",
+      "Subheading"
+    ]
+  },
+  "sample.docx": {
+    "text": "Document Heading 1\nThis is the first paragraph of the DOCX file.\nThis is the second paragraph.",
+    "word_count": 18,
+    "substrings": [
+      "first paragraph",
+      "second paragraph"
+    ],
+    "table": [
+      [
+        "Col1",
+        "Col2",
+        "Col3"
+      ],
+      [
+        "Val1",
+        "Val2",
+        "Val3"
+      ]
+    ],
+    "headings": [
+      "Document Heading 1"
+    ]
+  },
+  "sample.pdf": {
+    "substrings": [
+      "PDF Heading",
+      "first page of the PDF",
+      "second page"
+    ],
+    "page_count": 2,
+    "has_text_layer": true
+  },
+  "sample_scanned.pdf": {
+    "has_text_layer": false,
+    "scanned_text_substring": "burned into an image"
+  }
+}

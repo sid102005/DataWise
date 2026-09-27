@@ -1,0 +1,85 @@
+{
+  "processors": {
+    "tabular": {
+      "supported": true,
+      "planned_in_phase": null
+    },
+    "document": {
+      "supported": true,
+      "planned_in_phase": 10,
+      "limitations": {
+        "ocr": "Not supported - Tesseract binary missing",
+        "summarization": "Deferred to future phase for validation reasons",
+        "legacy_doc": "Detected but rejected (binary/macros not supported)"
+      }
+    },
+    "image": {
+      "supported": true,
+      "planned_in_phase": 11,
+      "operations": [
+        "resize",
+        "crop",
+        "rotate",
+        "convert_format",
+        "compress",
+        "extract_metadata"
+      ],
+      "limitations": {
+        "ocr": "Not supported - Tesseract binary missing",
+        "description_classification": "Deferred to future phase - requires vision LLM API key",
+        "background_removal": "Not supported",
+        "batch_processing": "Supported across all file categories in Phase 13"
+      }
+    },
+    "audio": {
+      "supported": true,
+      "planned_in_phase": 12,
+      "operations": [
+        "extract_metadata",
+        "trim",
+        "convert_format",
+        "compress"
+      ],
+      "limitations": {
+        "transcription": "Deferred to future phase - requires speech model"
+      }
+    },
+    "video": {
+      "supported": true,
+      "planned_in_phase": 12,
+      "operations": [
+        "extract_metadata",
+        "trim",
+        "extract_frame",
+        "resize",
+        "convert_format",
+        "compress",
+        "extract_audio"
+      ],
+      "limitations": {
+        "complex_effects": "Transitions, filters, and AI tracking deferred to future phase"
+      }
+    },
+    "archive": {
+      "supported": true,
+      "planned_in_phase": 13,
+      "operations": [
+        "profile",
+        "list_contents",
+        "extract_and_process"
+      ],
+      "formats": [
+        "zip",
+        "tar",
+        "gz"
+      ],
+      "limitations": {
+        "7z": "Deferred - requires py7zr external dependency"
+      }
+    },
+    "presentation": {
+      "supported": false,
+      "planned_in_phase": 14
+    }
+  }
+}

@@ -1,0 +1,6 @@
+Customer_ID,Name,Age,Date,Purchase,Region
+1001,Alice Smith,34,2024-01-15,9850.50,North
+1002,Bob Jones,45
+1003,"Charlie Brown, unclosed quote,29,2024-01-22,8900.25,East,ExtraColumn1,ExtraColumn2
+1004,Diana Prince,38,2024-02-01,8650.00,West
+1005

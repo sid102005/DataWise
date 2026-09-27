@@ -1,0 +1,56 @@
+{
+  "sample.jpg": {
+    "width": 800,
+    "height": 600,
+    "format": "JPEG",
+    "mode": "RGB",
+    "top_left_marker": "RED"
+  },
+  "sample.png": {
+    "width": 800,
+    "height": 600,
+    "format": "PNG",
+    "mode": "RGB",
+    "top_left_marker": "RED"
+  },
+  "sample.gif": {
+    "width": 800,
+    "height": 600,
+    "format": "GIF",
+    "mode": "P",
+    "top_left_marker": "RED"
+  },
+  "sample.bmp": {
+    "width": 800,
+    "height": 600,
+    "format": "BMP",
+    "mode": "RGB",
+    "top_left_marker": "RED"
+  },
+  "sample.webp": {
+    "width": 800,
+    "height": 600,
+    "format": "WEBP",
+    "mode": "RGB",
+    "top_left_marker": "RED"
+  },
+  "sample.tiff": {
+    "width": 800,
+    "height": 600,
+    "format": "TIFF",
+    "mode": "RGB",
+    "top_left_marker": "RED"
+  },
+  "fake_image.jpg": {
+    "is_valid_image": false,
+    "reason": "Text file with image extension"
+  },
+  "malformed_image.jpg": {
+    "is_valid_image": false,
+    "reason": "Truncated / corrupted JPEG stream"
+  },
+  "bomb_image.png": {
+    "is_valid_image": false,
+    "reason": "Decompression bomb claiming 100,000 x 100,000 pixels"
+  }
+}

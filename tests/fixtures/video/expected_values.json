@@ -1,0 +1,37 @@
+{
+  "sample.mp4": {
+    "format": "mp4",
+    "duration_seconds": 3.0,
+    "width": 320,
+    "height": 240,
+    "video_codec": "h264"
+  },
+  "sample.mov": {
+    "format": "mov",
+    "duration_seconds": 3.0,
+    "width": 320,
+    "height": 240,
+    "video_codec": "h264"
+  },
+  "sample.avi": {
+    "format": "avi",
+    "duration_seconds": 3.0,
+    "width": 320,
+    "height": 240,
+    "video_codec": "mpeg4"
+  },
+  "sample.mkv": {
+    "format": "mkv",
+    "duration_seconds": 3.0,
+    "width": 320,
+    "height": 240,
+    "video_codec": "h264"
+  },
+  "sample.webm": {
+    "format": "webm",
+    "duration_seconds": 3.0,
+    "width": 320,
+    "height": 240,
+    "video_codec": "vp8"
+  }
+}

@@ -1,0 +1,3 @@
+This is a plain text file.
+It contains multiple lines of known text.
+Word count should be straightforward.

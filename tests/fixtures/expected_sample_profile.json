@@ -1,0 +1,150 @@
+{
+  "description": "Ground truth expected profile for sample.csv, sample.xlsx, sample.json (50 rows)",
+  "file_properties": {
+    "row_count": 50,
+    "column_count": 6,
+    "columns": [
+      "Customer_ID",
+      "Name",
+      "Age",
+      "Date",
+      "Purchase",
+      "Region"
+    ],
+    "duplicate_row_count": 4,
+    "duplicate_percentage": 8.0,
+    "unique_row_count": 46
+  },
+  "column_profiles": {
+    "Customer_ID": {
+      "inferred_type": "id",
+      "null_count": 0,
+      "null_percentage": 0.0,
+      "unique_count": 46
+    },
+    "Name": {
+      "inferred_type": "text",
+      "null_count": 0,
+      "null_percentage": 0.0,
+      "unique_count": 46
+    },
+    "Age": {
+      "inferred_type": "numeric",
+      "null_count": 6,
+      "null_percentage": 12.0,
+      "unique_count": 31
+    },
+    "Date": {
+      "inferred_type": "date",
+      "null_count": 0,
+      "null_percentage": 0.0,
+      "unique_count": 46,
+      "formats_present": {
+        "YYYY-MM-DD": 33,
+        "DD/MM/YYYY": 17
+      }
+    },
+    "Purchase": {
+      "inferred_type": "numeric",
+      "null_count": 0,
+      "null_percentage": 0.0,
+      "unique_count": 46,
+      "min": 1950.5,
+      "max": 9850.5
+    },
+    "Region": {
+      "inferred_type": "categorical",
+      "null_count": 0,
+      "null_percentage": 0.0,
+      "unique_count": 4,
+      "distinct_values": [
+        "North",
+        "South",
+        "East",
+        "West"
+      ],
+      "value_counts": {
+        "North": 13,
+        "South": 13,
+        "West": 13,
+        "East": 11
+      }
+    }
+  },
+  "duplicate_row_indices_0_indexed": [
+    25,
+    35,
+    45,
+    49
+  ],
+  "null_age_row_indices_0_indexed": [
+    5,
+    12,
+    18,
+    27,
+    36,
+    44
+  ],
+  "top_10_purchases": [
+    {
+      "rank": 1,
+      "customer_id": 1001,
+      "name": "Alice Smith",
+      "purchase": 9850.5
+    },
+    {
+      "rank": 2,
+      "customer_id": 1002,
+      "name": "Bob Jones",
+      "purchase": 9420.0
+    },
+    {
+      "rank": 3,
+      "customer_id": 1003,
+      "name": "Charlie Brown",
+      "purchase": 8900.25
+    },
+    {
+      "rank": 4,
+      "customer_id": 1004,
+      "name": "Diana Prince",
+      "purchase": 8650.0
+    },
+    {
+      "rank": 5,
+      "customer_id": 1005,
+      "name": "Evan Wright",
+      "purchase": 8200.75
+    },
+    {
+      "rank": 6,
+      "customer_id": 1007,
+      "name": "George Clark",
+      "purchase": 7950.0
+    },
+    {
+      "rank": 7,
+      "customer_id": 1008,
+      "name": "Hannah Abbott",
+      "purchase": 7600.5
+    },
+    {
+      "rank": 8,
+      "customer_id": 1009,
+      "name": "Ian Malcolm",
+      "purchase": 7350.0
+    },
+    {
+      "rank": 9,
+      "customer_id": 1010,
+      "name": "Julia Roberts",
+      "purchase": 7100.25
+    },
+    {
+      "rank": 10,
+      "customer_id": 1011,
+      "name": "Kevin Bacon",
+      "purchase": 6850.0
+    }
+  ]
+}

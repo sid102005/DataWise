@@ -1,0 +1,67 @@
+{
+  "scenario_1": {
+    "status": "PASS",
+    "steps": [
+      "filter_rows"
+    ],
+    "rows": 11,
+    "dl_bytes": 570
+  },
+  "scenario_2": {
+    "status": "PASS",
+    "steps": [
+      "bar_chart"
+    ],
+    "rows": 50,
+    "chart_fn": "bar_ed8f9319.png",
+    "chart_bytes": 105127
+  },
+  "scenario_3": {
+    "status": "PASS",
+    "part_a_status": "needs_clarification",
+    "clarification_question": "Which rows or condition should be filtered?",
+    "part_b_status": "success",
+    "part_b_rows": 11
+  },
+  "attack_1_upload_traversal": {
+    "status": "PASS",
+    "evidence": "Saved strictly as input.csv in session dir"
+  },
+  "attack_2_download_traversal": {
+    "status": "PASS",
+    "evidence": "Rejected before filesystem check with HTTP 400"
+  },
+  "attack_3_zip_bomb": {
+    "status": "PASS",
+    "evidence": "Excel file exceeds maximum cell limit of 5,000,000 cells (estimated 6,000,000 cells). Potential decompression bomb."
+  },
+  "attack_4_file_limits": {
+    "status": "PASS",
+    "evidence": "Both .exe and >50MB rejected with HTTP 400"
+  },
+  "attack_5_prompt_injection": {
+    "status": "PASS",
+    "planned_tools": [
+      "bar_chart"
+    ],
+    "evidence": "Strict subset of registered tools; no unauthorized tool executed"
+  },
+  "attack_6_session_isolation": {
+    "status": "PASS",
+    "evidence": "Separate directories and non-overlapping content"
+  },
+  "attack_7_retry_and_budget": {
+    "status": "PASS",
+    "attempts": 3,
+    "evidence": "Strictly bounded to 3 attempts, never exceeds limit"
+  },
+  "scale_benchmark": {
+    "status": "PASS",
+    "rows": 500000,
+    "size_mb": 13.36,
+    "elapsed_seconds": 0.82,
+    "prd_target_seconds": 60.0,
+    "pipeline_status": "success",
+    "result_rows": 10
+  }
+}

@@ -1,0 +1,3 @@
+This is an invalid file for DataWise ingestion.
+It has a .txt extension instead of .csv, .xlsx, or .json.
+The InputManager must reject this file with a clear error indicating unsupported file extension.

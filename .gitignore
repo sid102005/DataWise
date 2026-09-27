@@ -1,0 +1,131 @@
+# ==============================================================================
+# DataWise Project .gitignore
+# Production-ready Git ignore rules tailored for the DataWise AI Data Agent.
+# ==============================================================================
+
+# =========================
+# Environment & Secrets
+# =========================
+# Protect environment files and sensitive credentials from version control
+.env
+.env.*
+.env.local
+.env.production
+!.env.example
+
+# =========================
+# Python
+# =========================
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Distribution / packaging artifacts
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# =========================
+# Virtual Environments
+# =========================
+# Local Python virtual environment directories
+.venv/
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# =========================
+# Test & Coverage Artifacts
+# =========================
+# Testing framework and linter caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+
+# Runtime audit runs and generated test data
+tests/generated/
+
+# =========================
+# User Uploads & Runtime Sessions
+# =========================
+# CRITICAL: Runtime sessions contain uploaded user data and processed results.
+# They must NEVER be committed to Git.
+# Canonical fixtures in tests/fixtures/ and sample datasets in test_data/ are tracked.
+workspace/sessions/
+workspace/charts/
+workspace/*.csv
+workspace/*.xlsx
+workspace/*.json
+test_data/uploads/
+uploads/
+uploaded_files/
+
+# =========================
+# Streamlit
+# =========================
+# Streamlit runtime caches (project config in .streamlit/config.toml is preserved)
+.streamlit/cache/
+
+# =========================
+# Temporary Files & Logs
+# =========================
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+
+# =========================
+# Database & Runtime Artifacts
+# =========================
+# Volatile local databases and temporary stores
+*.sqlite
+*.sqlite3
+*.db
+
+# =========================
+# IDE & Code Editors
+# =========================
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+*.swp
+*.swo
+
+# =========================
+# Operating System Artifacts
+# =========================
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+desktop.ini

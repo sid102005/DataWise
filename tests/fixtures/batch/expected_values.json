@@ -1,0 +1,43 @@
+{
+  "images": {
+    "files": [
+      "img1.jpg",
+      "img2.jpg",
+      "img3.jpg"
+    ],
+    "count": 3,
+    "original_size": [
+      200,
+      200
+    ],
+    "batch_operation": "resize to 100x100",
+    "expected_size": [
+      100,
+      100
+    ]
+  },
+  "tabular": {
+    "files": [
+      "data1.csv",
+      "data2.csv",
+      "data3.csv"
+    ],
+    "count": 3,
+    "total_rows": 6
+  },
+  "mixed": {
+    "files": [
+      "part1.csv",
+      "part2.csv",
+      "photo.jpg"
+    ],
+    "tabular_files": [
+      "part1.csv",
+      "part2.csv"
+    ],
+    "non_tabular_files": [
+      "photo.jpg"
+    ],
+    "expected_excluded": "photo.jpg"
+  }
+}
