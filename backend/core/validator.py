@@ -460,6 +460,20 @@ def _run_operation_specific_checks(
             details[check_key] = msg
             (passed if ok else failed).append(check_key)
 
+        elif tn == "select_columns":
+            cols_param = params.get("columns", [])
+            wanted = [cols_param] if isinstance(cols_param, str) else list(cols_param)
+            check_key = "COLUMN_SELECTION"
+            actual = list(result_df.columns)
+            ok = actual == wanted
+            msg = (
+                f"Step {sn} select_columns: columns match {wanted}."
+                if ok
+                else f"Step {sn} select_columns: expected {wanted}, got {actual}."
+            )
+            details[check_key] = msg
+            (passed if ok else failed).append(check_key)
+
         elif tn == "sort_values":
             col = params.get("column", "")
             ascending = bool(params.get("ascending", True))

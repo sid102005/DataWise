@@ -44,6 +44,7 @@ _TOOL_REGISTRY: dict[str, Any] = {
     # --- Transform ---
     "drop_column": _transform.drop_column,
     "add_column": _transform.add_column,
+    "select_columns": _transform.select_columns,
     "rename_columns": _transform.rename_columns,
     "filter_rows": _transform.filter_rows,
     "add_derived_column": _transform.add_derived_column,

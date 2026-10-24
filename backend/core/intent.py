@@ -33,7 +33,7 @@ import logging
 import re
 from typing import Any
 
-from backend.models.schemas import DataProfile, Objective, ObjectiveCategory
+from backend.models.schemas import DataProfile, InferredType, Objective, ObjectiveCategory
 
 log = logging.getLogger(__name__)
 
@@ -46,8 +46,9 @@ _KEYWORD_MAP: list[tuple[re.Pattern[str], ObjectiveCategory]] = [
     (re.compile(r"\b(group|grouping|aggregat\w*|sum|average|avg|count|min|max|total)\b", re.I), ObjectiveCategory.AGGREGATE),
     (re.compile(r"\b(sort|rank|top[\s-]?\d+|bottom[\s-]?\d+|highest|lowest|largest|smallest)\b", re.I), ObjectiveCategory.AGGREGATE),
     (re.compile(r"\b(chart|plot|graph|visuali[sz]\w*|bar|line|pie)\b", re.I), ObjectiveCategory.VISUALIZE),
+    # "only" kept for filter-style prompts ("only Region = East"); select extractors run first.
     (re.compile(r"\b(filter|where|only|exclude|keep|remove row)\b", re.I), ObjectiveCategory.TRANSFORM),
-    (re.compile(r"\b(rename|reorder|add column|derive|calculate|compute)\b", re.I), ObjectiveCategory.TRANSFORM),
+    (re.compile(r"\b(rename|reorder|add column|derive|calculate|compute|select column|display column)\b", re.I), ObjectiveCategory.TRANSFORM),
     (re.compile(r"\b(correlat\w*|distribut\w*|stat\w*|mean|median|std|outlier\w*)\b", re.I), ObjectiveCategory.STAT),
     (re.compile(r"\b(extract|pull|find|list|show me)\b", re.I), ObjectiveCategory.EXTRACT),
     (re.compile(r"\b(report|summary|summariz\w*|overview)\b", re.I), ObjectiveCategory.REPORT),
@@ -276,6 +277,179 @@ def _extract_column_operations(
     return objectives
 
 
+def _extract_select_operations(prompt: str, profile: DataProfile) -> list[Objective]:
+    """Extract column-projection intents (keep/show/display/select columns)."""
+    if not profile.columns:
+        return []
+
+    text = prompt.strip()
+    col_map = {c.name.lower(): c.name for c in profile.columns}
+    col_names = [c.name for c in profile.columns]
+
+    # "only display/show/keep 2 columns" / "display only 2 columns"
+    m_count = re.search(
+        r"\b(?:only\s+)?(?:display|show|keep|select|project)\s+(?:only\s+)?(\d+)\s+columns?\b"
+        r"|\b(?:display|show|keep|select)\s+only\s+(\d+)\s+columns?\b"
+        r"|\bonly\s+(\d+)\s+columns?\b",
+        text,
+        re.I,
+    )
+    if m_count:
+        count = int(next(g for g in m_count.groups() if g is not None))
+        return [
+            Objective(
+                category=ObjectiveCategory.TRANSFORM,
+                description=f"select_columns_first: {count}",
+                target_columns=col_names[:count],
+                parameters={"count": count},
+            )
+        ]
+
+    # Named columns: "show only Name and Age", "keep columns Name, Age",
+    # "select Name, Age columns", "display only the Name and Age columns"
+    m_named = re.search(
+        r"\b(?:show|display|keep|select|project|include)\s+"
+        r"(?:only\s+)?(?:the\s+)?(?:columns?\s+)?"
+        r"(.+?)"
+        r"(?:\s+columns?)?\s*$",
+        text,
+        re.I,
+    )
+    # Also: "only columns Name and Age" / "only Name and Age columns"
+    if not m_named:
+        m_named = re.search(
+            r"\bonly\s+(?:the\s+)?(?:columns?\s+)?(.+?)(?:\s+columns?)?\s*$",
+            text,
+            re.I,
+        )
+
+    if m_named:
+        raw = m_named.group(1).strip()
+        # Skip if this looks like a filter condition (has comparison ops)
+        if re.search(r"[<>=]|where\b", raw, re.I):
+            return []
+        # Skip pure count-like leftovers
+        if re.fullmatch(r"\d+", raw):
+            return []
+
+        # Split on commas / "and" / "&"
+        parts = re.split(r"\s*(?:,|&|\band\b)\s*", raw, flags=re.I)
+        resolved: list[str] = []
+        for part in parts:
+            token = re.sub(
+                r"\b(the|column|columns|field|fields|of)\b",
+                " ",
+                part,
+                flags=re.I,
+            ).strip(" \t\"'")
+            if not token:
+                continue
+            actual = _fuzzy_match_column(token, col_map)
+            if actual and actual not in resolved:
+                resolved.append(actual)
+
+        if resolved:
+            return [
+                Objective(
+                    category=ObjectiveCategory.TRANSFORM,
+                    description=f"select_columns: {', '.join(resolved)}",
+                    target_columns=resolved,
+                )
+            ]
+
+    return []
+
+
+def _extract_aggregate_operations(prompt: str, profile: DataProfile) -> list[Objective]:
+    """Extract structured sort / top-N / groupby intents."""
+    if not profile.columns:
+        return []
+
+    text = prompt.strip()
+    col_map = {c.name.lower(): c.name for c in profile.columns}
+    typed_numeric = [c.name for c in profile.columns if c.inferred_type == InferredType.NUMERIC]
+    id_like = {c.name for c in profile.columns if c.inferred_type == InferredType.ID}
+
+    # group by X and sum/avg/count Y
+    gm = re.search(
+        r"\bgroup(?:\s*by)?\s+([A-Za-z0-9_]+)\b.*?\b(sum|avg|average|mean|count|min|max)\b\s+([A-Za-z0-9_]+)",
+        text,
+        re.I,
+    )
+    if gm:
+        by_raw, agg_raw, metric_raw = gm.groups()
+        by_col = _fuzzy_match_column(by_raw, col_map) or by_raw
+        metric_col = _fuzzy_match_column(metric_raw, col_map) or metric_raw
+        agg = "mean" if agg_raw.lower() in {"avg", "average"} else agg_raw.lower()
+        return [
+            Objective(
+                category=ObjectiveCategory.AGGREGATE,
+                description=f"groupby: {by_col} | metric: {metric_col} | agg: {agg}",
+                target_columns=[by_col, metric_col],
+                parameters={"by": by_col, "metric": metric_col, "agg": agg},
+            )
+        ]
+
+    # top / bottom N
+    tm = re.search(r"\b(top|bottom)[\s-]?(\d+)\b", text, re.I)
+    if tm:
+        direction = "descending" if tm.group(1).lower() == "top" else "ascending"
+        n_val = int(tm.group(2))
+        # optional "by Col"
+        by_m = re.search(r"\bby\s+([A-Za-z0-9_]+)", text, re.I)
+        col = _fuzzy_match_column(by_m.group(1), col_map) if by_m else None
+        if not col:
+            col = next((c for c in typed_numeric if c not in id_like), typed_numeric[0] if typed_numeric else None)
+        if col:
+            return [
+                Objective(
+                    category=ObjectiveCategory.AGGREGATE,
+                    description=f"sort_column: {col} {direction}",
+                    target_columns=[col],
+                    parameters={"column": col, "ascending": direction == "ascending"},
+                ),
+                Objective(
+                    category=ObjectiveCategory.AGGREGATE,
+                    description=f"top_n: {n_val}",
+                    target_columns=[col],
+                    parameters={"n": n_val},
+                ),
+            ]
+
+    # sort [by Col] [asc/desc]
+    if re.search(r"\b(sort|order\s+by|rank)\b", text, re.I):
+        by_m = re.search(r"\b(?:sort|order|rank)\b.*?\bby\s+([A-Za-z0-9_]+)", text, re.I)
+        col = _fuzzy_match_column(by_m.group(1), col_map) if by_m else None
+        if not col:
+            # column named anywhere in the prompt
+            for name, actual in col_map.items():
+                if re.search(rf"\b{re.escape(name)}\b", text, re.I):
+                    col = actual
+                    break
+        if not col:
+            col = next((c for c in typed_numeric if c not in id_like), typed_numeric[0] if typed_numeric else None)
+        if not col and profile.columns:
+            col = profile.columns[0].name
+
+        if col:
+            if re.search(r"\b(desc|descending|highest|largest)\b", text, re.I):
+                direction = "descending"
+            elif re.search(r"\b(asc|ascending|lowest|smallest)\b", text, re.I):
+                direction = "ascending"
+            else:
+                direction = "ascending"
+            return [
+                Objective(
+                    category=ObjectiveCategory.AGGREGATE,
+                    description=f"sort_column: {col} {direction}",
+                    target_columns=[col],
+                    parameters={"column": col, "ascending": direction == "ascending"},
+                )
+            ]
+
+    return []
+
+
 def _parse_deterministic(prompt: str, profile: DataProfile) -> list[Objective]:
     """Rule-based fallback parser. Returns at least one Objective."""
 
@@ -284,7 +458,17 @@ def _parse_deterministic(prompt: str, profile: DataProfile) -> list[Objective]:
     if col_ops:
         return col_ops
 
-    # 2. General keyword → category mapping
+    # 2. Column projection (select / show only / display N columns)
+    select_ops = _extract_select_operations(prompt, profile)
+    if select_ops:
+        return select_ops
+
+    # 3. Sort / top-N / groupby
+    agg_ops = _extract_aggregate_operations(prompt, profile)
+    if agg_ops:
+        return agg_ops
+
+    # 4. General keyword → category mapping
     detected: list[ObjectiveCategory] = []
     for pattern, category in _KEYWORD_MAP:
         if pattern.search(prompt) and category not in detected:

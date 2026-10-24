@@ -10,15 +10,18 @@ if (fs.existsSync(path.join(projectDir, 'DataWise', 'backend'))) {
 
 console.log(`\x1b[36m[DataWise]\x1b[0m Starting DataWise development environment from: ${projectDir}`);
 
-// Determine python command
+// Prefer project venv so deps match local setup
 function getPythonCommand() {
-  if (process.platform === 'win32') {
-    return 'py';
-  }
+  const winVenv = path.join(projectDir, '.venv', 'Scripts', 'python.exe');
+  const unixVenv = path.join(projectDir, '.venv', 'bin', 'python');
+  if (fs.existsSync(winVenv)) return winVenv;
+  if (fs.existsSync(unixVenv)) return unixVenv;
+  if (process.platform === 'win32') return 'py';
   return 'python3';
 }
 
 const pyCmd = getPythonCommand();
+console.log(`\x1b[36m[DataWise]\x1b[0m Using Python: ${pyCmd}`);
 
 // 1. Start FastAPI Backend
 console.log('\x1b[34m[Backend]\x1b[0m Launching FastAPI (Uvicorn) on http://127.0.0.1:8000...');

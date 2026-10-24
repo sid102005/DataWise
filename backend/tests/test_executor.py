@@ -73,6 +73,7 @@ class TestToolRegistry:
             "standardize_dates",
             "drop_column",
             "add_column",
+            "select_columns",
             "rename_columns",
             "filter_rows",
             "add_derived_column",

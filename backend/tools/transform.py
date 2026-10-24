@@ -37,6 +37,34 @@ def drop_column(df: pd.DataFrame, column: str) -> pd.DataFrame:
     return df.drop(columns=[column])
 
 
+def select_columns(df: pd.DataFrame, columns: list[str] | str) -> pd.DataFrame:
+    """Keep only the listed columns, in the order given.
+
+    Args:
+        df: Input DataFrame.
+        columns: Column name or list of column names to keep.
+
+    Returns:
+        DataFrame containing only the requested columns.
+
+    Raises:
+        ToolInputError: If columns is empty or any name does not exist.
+    """
+    cols = [columns] if isinstance(columns, str) else list(columns)
+    if not cols:
+        raise ToolInputError("select_columns requires at least one column name.")
+    for col in cols:
+        _validate_column_exists(df, col)
+    # Preserve requested order; drop duplicates while keeping first occurrence
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for col in cols:
+        if col not in seen:
+            seen.add(col)
+            ordered.append(col)
+    return df.loc[:, ordered].copy()
+
+
 def add_column(
     df: pd.DataFrame,
     column: str,

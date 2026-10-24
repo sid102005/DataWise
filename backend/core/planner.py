@@ -135,64 +135,161 @@ def _steps_for_clean(profile: DataProfile, step_offset: int) -> list[Step]:
     return steps
 
 
+def _pick_rank_column(objectives: list[Objective], profile: DataProfile) -> str | None:
+    """Choose a numeric column for sort/top-N, preferring names mentioned in objectives."""
+    numeric_cols = _numeric_columns(profile)
+    id_names = {c.lower() for c in _id_columns(profile)}
+    col_map = {c.name.lower(): c.name for c in (profile.columns or [])}
+
+    for obj in objectives:
+        # Structured: sort_column: <col> ...
+        m = re.match(r"sort_column:\s*([A-Za-z0-9_]+)", obj.description, re.I)
+        if m:
+            named = col_map.get(m.group(1).lower())
+            if named:
+                return named
+        for c in numeric_cols:
+            if c.lower() not in id_names and re.search(rf"\b{re.escape(c)}\b", obj.description, re.I):
+                return c
+        for c in (profile.columns or []):
+            if re.search(rf"\b{re.escape(c.name)}\b", obj.description, re.I):
+                return c.name
+
+    return next(
+        (c for c in numeric_cols if c.lower() not in id_names),
+        numeric_cols[0] if numeric_cols else None,
+    )
+
+
+def _parse_sort_direction(text: str) -> bool:
+    """Return True for ascending, False for descending. Default: ascending for bare sort."""
+    if re.search(r"\b(desc|descending|highest|largest|top)\b", text, re.I):
+        return False
+    if re.search(r"\b(asc|ascending|lowest|smallest|bottom)\b", text, re.I):
+        return True
+    return True
+
+
 def _steps_for_aggregate(
     objectives: list[Objective],
     profile: DataProfile,
     step_offset: int,
 ) -> list[Step]:
-    """Generate sort + top-N steps from aggregate objectives."""
+    """Generate groupby / sort / top-N steps from aggregate objectives.
+
+    Structured descriptions from intent.py:
+      - groupby: <col> | metric: <col> | agg: <fn>
+      - sort_column: <col> ascending|descending
+      - top_n: <n> [by <col>] [ascending|descending]
+    """
     steps: list[Step] = []
     n = step_offset
+    col_map = {c.name.lower(): c.name for c in (profile.columns or [])}
+    full_text = " ".join(o.description for o in objectives)
 
-    # Find the best numeric column for ranking
-    numeric_cols = _numeric_columns(profile)
-    id_names = {c.lower() for c in _id_columns(profile)}
-
-    # Prioritize numeric column explicitly mentioned in any objective description
-    rank_col: str | None = None
+    # ── Structured groupby ────────────────────────────────────────────────
     for obj in objectives:
-        for c in numeric_cols:
-            if c.lower() not in id_names and re.search(rf"\b{re.escape(c)}\b", obj.description, re.I):
-                rank_col = c
-                break
-        if rank_col:
+        gm = re.match(
+            r"groupby:\s*([A-Za-z0-9_]+)\s*\|\s*metric:\s*([A-Za-z0-9_]+)\s*\|\s*agg:\s*([A-Za-z]+)",
+            obj.description,
+            re.I,
+        )
+        if gm:
+            by_raw, metric_raw, agg = gm.group(1), gm.group(2), gm.group(3).lower()
+            by_col = col_map.get(by_raw.lower(), by_raw)
+            metric_col = col_map.get(metric_raw.lower(), metric_raw)
+            n += 1
+            steps.append(Step(
+                step_number=n,
+                tool_name="groupby_aggregate",
+                description=f"Group by '{by_col}' and {agg} '{metric_col}'.",
+                parameters={"by": by_col, "metric": metric_col, "agg": agg},
+                expected_output=f"One row per '{by_col}' with {agg} of '{metric_col}'.",
+            ))
+            return steps
+
+    # Legacy free-text groupby: "group by Region and sum Sales"
+    legacy_gb = re.search(
+        r"\bgroup(?:\s*by)?\s+([A-Za-z0-9_]+)\b.*?\b(sum|avg|average|mean|count|min|max)\b\s+([A-Za-z0-9_]+)",
+        full_text,
+        re.I,
+    )
+    if legacy_gb:
+        by_raw, agg_raw, metric_raw = legacy_gb.groups()
+        agg = "mean" if agg_raw.lower() in {"avg", "average"} else agg_raw.lower()
+        by_col = col_map.get(by_raw.lower(), by_raw)
+        metric_col = col_map.get(metric_raw.lower(), metric_raw)
+        n += 1
+        steps.append(Step(
+            step_number=n,
+            tool_name="groupby_aggregate",
+            description=f"Group by '{by_col}' and {agg} '{metric_col}'.",
+            parameters={"by": by_col, "metric": metric_col, "agg": agg},
+            expected_output=f"One row per '{by_col}' with {agg} of '{metric_col}'.",
+        ))
+        return steps
+
+    # ── Top-N (explicit) — sort then truncate ─────────────────────────────
+    top_n_val: int | None = None
+    for obj in objectives:
+        m = re.search(r"(?:top_n:\s*|top[\s-]?)(\d+)\b", obj.description, re.I)
+        if m:
+            top_n_val = int(m.group(1))
+            break
+        m = re.search(r"\bbottom[\s-]?(\d+)\b", obj.description, re.I)
+        if m:
+            top_n_val = int(m.group(1))
             break
 
-    if not rank_col:
-        rank_col = next(
-            (c for c in numeric_cols if c.lower() not in id_names),
-            numeric_cols[0] if numeric_cols else None,
-        )
+    wants_sort = bool(re.search(r"\b(sort|rank|order)\b", full_text, re.I)) or any(
+        o.description.lower().startswith("sort_column:") for o in objectives
+    )
+    # Bare "top 10" / "highest" without sort still needs ordering
+    wants_rank = top_n_val is not None or bool(
+        re.search(r"\b(highest|lowest|largest|smallest|rank)\b", full_text, re.I)
+    )
 
+    if not wants_sort and not wants_rank:
+        # Aggregate keyword with no actionable sort/groupby — leave empty
+        # (caller must not silently substitute unrelated clean steps).
+        return steps
+
+    rank_col = _pick_rank_column(objectives, profile)
     if rank_col is None:
-        return steps  # no numeric column — skip aggregate steps
+        return steps
 
-    # Determine top-N from objective description text
-    top_n_val = 10  # default
+    ascending = _parse_sort_direction(full_text)
+    # Structured sort_column overrides direction token if present
     for obj in objectives:
-        if obj.category == ObjectiveCategory.AGGREGATE:
-            m = re.search(r"\btop[\s-]?(\d+)\b", obj.description, re.I)
-            if m:
-                top_n_val = int(m.group(1))
-                break
+        sm = re.match(
+            r"sort_column:\s*[A-Za-z0-9_]+\s+(ascending|descending|asc|desc)\b",
+            obj.description,
+            re.I,
+        )
+        if sm:
+            ascending = sm.group(1).lower() in {"ascending", "asc"}
+            break
 
+    direction = "ascending" if ascending else "descending"
     n += 1
     steps.append(Step(
         step_number=n,
         tool_name="sort_values",
-        description=f"Sort rows by '{rank_col}' descending.",
-        parameters={"column": rank_col, "ascending": False},
-        expected_output=f"Rows ordered by '{rank_col}' from highest to lowest.",
+        description=f"Sort rows by '{rank_col}' {direction}.",
+        parameters={"column": rank_col, "ascending": ascending},
+        expected_output=f"Rows ordered by '{rank_col}' {direction}.",
     ))
 
-    n += 1
-    steps.append(Step(
-        step_number=n,
-        tool_name="top_n",
-        description=f"Keep top {top_n_val} rows by '{rank_col}'.",
-        parameters={"n": top_n_val},
-        expected_output=f"Result contains at most {top_n_val} rows.",
-    ))
+    # Only truncate when the user asked for top/bottom N — never for bare sort
+    if top_n_val is not None:
+        n += 1
+        steps.append(Step(
+            step_number=n,
+            tool_name="top_n",
+            description=f"Keep top {top_n_val} rows by '{rank_col}'.",
+            parameters={"n": top_n_val},
+            expected_output=f"Result contains at most {top_n_val} rows.",
+        ))
 
     return steps
 
@@ -244,6 +341,8 @@ def _steps_for_transform(
       - "add_column: <col>"                   → add_column tool
       - "rename_column: <old> to <new>"       → rename_columns tool
       - "rename_column_not_found: ..."        → ToolInputError at execution
+      - "select_columns: <col>, <col>"        → select_columns tool
+      - "select_columns_first: <n>"           → keep first N columns
       - Anything else: legacy regex-based filter / rename matching (fallback)
     """
     steps: list[Step] = []
@@ -252,6 +351,47 @@ def _steps_for_transform(
 
     for obj in objectives:
         desc = obj.description
+
+        # ── Structured: select_columns ───────────────────────────────────────
+        if desc.startswith("select_columns: "):
+            raw_cols = [c.strip() for c in desc[len("select_columns: "):].split(",") if c.strip()]
+            resolved: list[str] = []
+            for raw in raw_cols:
+                actual = col_map.get(raw.lower())
+                if actual and actual not in resolved:
+                    resolved.append(actual)
+            if resolved:
+                n += 1
+                steps.append(
+                    Step(
+                        step_number=n,
+                        tool_name="select_columns",
+                        description=f"Keep only columns: {', '.join(resolved)}.",
+                        parameters={"columns": resolved},
+                        expected_output=f"Result contains only: {', '.join(resolved)}.",
+                    )
+                )
+            continue
+
+        if desc.startswith("select_columns_first: "):
+            try:
+                count = int(desc[len("select_columns_first: "):].strip())
+            except ValueError:
+                count = 0
+            available = [c.name for c in (profile.columns or [])]
+            resolved = available[: max(0, count)]
+            if resolved:
+                n += 1
+                steps.append(
+                    Step(
+                        step_number=n,
+                        tool_name="select_columns",
+                        description=f"Keep first {len(resolved)} column(s): {', '.join(resolved)}.",
+                        parameters={"columns": resolved},
+                        expected_output=f"Result contains only: {', '.join(resolved)}.",
+                    )
+                )
+            continue
 
         # ── Structured: drop_column ──────────────────────────────────────────
         if desc.startswith("drop_column: "):
@@ -791,9 +931,8 @@ def _build_heuristic_plan(
     if ObjectiveCategory.VISUALIZE in categories:
         all_steps.extend(_steps_for_visualize(profile, len(all_steps)))
 
-    if not all_steps:
-        # Safety net: if nothing matched, generate a profile-aware clean plan
-        all_steps.extend(_steps_for_clean(profile, 0))
+    # Do NOT fall back to unrelated clean steps when transform/aggregate matched
+    # no tools — that caused "show only 2 columns" to silently dedupe/impute instead.
 
     rationale = (
         f"Heuristic plan for {len(objectives)} objective(s): "
@@ -814,7 +953,7 @@ def _build_heuristic_plan(
 _ALLOWED_TOOL_NAMES = frozenset({
     # Tabular
     "drop_duplicates", "handle_missing", "fix_type_mismatches", "standardize_dates",
-    "drop_column", "add_column", "rename_columns", "filter_rows", "add_derived_column",
+    "drop_column", "add_column", "select_columns", "rename_columns", "filter_rows", "add_derived_column",
     "groupby_aggregate", "sort_values", "top_n",
     "bar_chart", "line_chart", "pie_chart",
     # Document

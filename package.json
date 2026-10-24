@@ -6,8 +6,8 @@
   "scripts": {
     "dev": "node dev.js",
     "start": "node dev.js",
-    "backend": "py -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1",
-    "frontend": "py -m streamlit run frontend/app.py --server.port 8501"
+    "backend": ".venv/Scripts/python.exe -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1",
+    "frontend": ".venv/Scripts/python.exe -m streamlit run frontend/app.py --server.port 8501"
   },
   "keywords": [
     "datawise",
