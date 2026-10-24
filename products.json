@@ -1,0 +1,50 @@
+
+{
+  "0": {
+    "product_id": "sofa001",
+    "name": "Chesterfield Sofa",
+    "category": "Living Room",
+    "price": 1299.99,
+    "dimensions": {
+      "length": 220,
+      "width": 90,
+      "height": 85
+    },
+    "materials": [
+      "Leather",
+      "Wood"
+    ],
+    "available": true
+  },
+  "1": {
+    "product_id": "table002",
+    "name": "Oak Dining Table",
+    "category": "Dining Room",
+    "price": 599.5,
+    "dimensions": {
+      "length": 180,
+      "width": 90,
+      "height": 75
+    },
+    "materials": [
+      "Oak Wood"
+    ],
+    "available": true
+  },
+  "2": {
+    "product_id": "bed003",
+    "name": "King Size Bed Frame",
+    "category": "Bedroom",
+    "price": 899,
+    "dimensions": {
+      "length": 210,
+      "width": 190,
+      "height": 100
+    },
+    "materials": [
+      "Solid Wood",
+      "Metal"
+    ],
+    "available": false
+  }
+}

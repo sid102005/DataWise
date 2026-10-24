@@ -372,7 +372,7 @@ class DataWisePipeline:
                 all_step_results = after_state.get("step_results", [])
                 chart_paths = after_state.get("chart_paths", [])
 
-            except (ExecutorError, ExecutionError, ToolInputError, DataWiseError) as exc:
+            except (ExecutorError, ExecutionError, ToolInputError, DataWiseError, ValueError) as exc:
                 last_error = f"Execution failed: {exc.message if hasattr(exc, 'message') else str(exc)}"
                 log.warning("Stage 4 (execution) attempt %d: %s", attempt, last_error)
                 # No point validating a completely failed execution — retry immediately if attempts remain

@@ -19,9 +19,13 @@ ARCHITECTURE CONTRACT:
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 import uuid
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 from backend.models.schemas import (
     ClarificationRequest,
@@ -807,6 +811,213 @@ def _build_heuristic_plan(
     )
 
 
+_ALLOWED_TOOL_NAMES = frozenset({
+    # Tabular
+    "drop_duplicates", "handle_missing", "fix_type_mismatches", "standardize_dates",
+    "drop_column", "add_column", "rename_columns", "filter_rows", "add_derived_column",
+    "groupby_aggregate", "sort_values", "top_n",
+    "bar_chart", "line_chart", "pie_chart",
+    # Document
+    "extract_text", "clean_text", "count_words", "extract_headings", "extract_tables", "llm_analysis",
+    # Image
+    "resize", "crop", "rotate", "convert_format", "compress",
+    # Audio
+    "extract_metadata", "trim", "convert_format", "compress",
+    # Video
+    "extract_metadata", "trim", "resize", "extract_frame", "extract_audio",
+    # Archive
+    "list_members", "safe_extract", "process_members", "repackage",
+})
+
+
+def _build_llm_plan(
+    objectives: list[Objective],
+    profile: DataProfile,
+    session_id: str,
+    plan_id: str,
+    llm_client: Any,
+) -> Plan | None:
+    """Generate an execution plan via structured LLM reasoning."""
+    if not hasattr(llm_client, "generate_structured"):
+        return None
+
+    columns_summary = [
+        {"name": c.name, "type": c.inferred_type.value, "null_count": c.null_count}
+        for c in (profile.columns or [])
+    ]
+    objs_summary = [
+        {"category": o.category.value, "description": o.description, "target_columns": o.target_columns, "parameters": o.parameters}
+        for o in objectives
+    ]
+
+    system_prompt = (
+        "You are the DataWise Deterministic Task Planner.\n"
+        "Your task: Translate user objectives and data profile metadata into an ordered sequence of Steps.\n"
+        "CRITICAL RULES:\n"
+        "1. Strictly use ONLY tools from the registered tool catalog:\n"
+        "   - drop_duplicates: params {subset: list[str]|null, keep: 'first'|'last'}\n"
+        "   - handle_missing: params {strategy: 'drop'|'fill_mean'|'fill_median'|'fill_mode'|'fill_value', columns: list[str]|null, fill_value: any}\n"
+        "   - fix_type_mismatches: params {column: str, target_type: 'numeric'|'date'|'string'}\n"
+        "   - standardize_dates: params {column: str, target_format: '%Y-%m-%d'}\n"
+        "   - drop_column: params {columns: list[str]}\n"
+        "   - add_column: params {expression: str (pandas eval expr), new_column: str}\n"
+        "   - rename_columns: params {mapping: {old_name: new_name}}\n"
+        "   - filter_rows: params {condition: str (pandas query syntax)}\n"
+        "   - groupby_aggregate: params {by: list[str], aggregations: {col: 'sum'|'mean'|'avg'|'count'|'min'|'max'}}\n"
+        "   - sort_values: params {by: str|list[str], ascending: bool}\n"
+        "   - top_n: params {by: str, n: int}\n"
+        "   - bar_chart: params {x_column: str, y_column: str}\n"
+        "   - line_chart: params {x_column: str, y_column: str}\n"
+        "   - pie_chart: params {category_column: str, value_column: str}\n"
+        "2. Ground all column names in the provided Available columns. Never invent non-existent column names.\n"
+        "3. Step numbers must be 1-indexed integers in sequential order (1, 2, 3...).\n"
+        "4. If user intent is genuinely ambiguous or contradictory, set needs_clarification=true and clarification_question.\n\n"
+        "Respond with a JSON object conforming to:\n"
+        "{\n"
+        '  "rationale": "High-level reasoning for this plan",\n'
+        '  "needs_clarification": false,\n'
+        '  "clarification_question": null,\n'
+        '  "steps": [\n'
+        '    {\n'
+        '      "step_number": 1,\n'
+        '      "tool_name": "tool_name_from_catalog",\n'
+        '      "description": "Explanation of what this step does",\n'
+        '      "parameters": {"param": "value"},\n'
+        '      "expected_output": "What state condition is expected afterwards"\n'
+        '    }\n'
+        '  ]\n'
+        "}"
+    )
+
+    user_content = (
+        f"Objectives: {json.dumps(objs_summary)}\n\n"
+        f"File format: {profile.file_format}\n"
+        f"Row count: {getattr(profile, 'row_count', 'unknown')}\n"
+        f"Available columns: {json.dumps(columns_summary)}"
+    )
+
+    try:
+        data = llm_client.generate_structured(prompt=user_content, system_prompt=system_prompt)
+        raw_steps = data.get("steps", [])
+        if not raw_steps and not data.get("needs_clarification"):
+            return None
+
+        parsed_steps: list[Step] = []
+        for i, stp in enumerate(raw_steps, start=1):
+            if isinstance(stp, dict):
+                tname = str(stp.get("tool_name", "")).strip()
+                if tname not in _ALLOWED_TOOL_NAMES:
+                    log.warning("LLM generated unregistered tool '%s', skipping step", tname)
+                    continue
+                params = stp.get("parameters") or {}
+                if not isinstance(params, dict):
+                    params = {}
+                parsed_steps.append(
+                    Step(
+                        step_number=int(stp.get("step_number", i)),
+                        tool_name=tname,
+                        description=str(stp.get("description", f"Step {i}: {tname}")),
+                        parameters=params,
+                        expected_output=str(stp.get("expected_output", f"Executed {tname}")),
+                    )
+                )
+
+        if parsed_steps or data.get("needs_clarification"):
+            return Plan(
+                plan_id=plan_id,
+                session_id=session_id,
+                objectives=objectives,
+                steps=parsed_steps,
+                needs_clarification=bool(data.get("needs_clarification", False)),
+                clarification_question=data.get("clarification_question"),
+                rationale=str(data.get("rationale", "LLM-synthesized deterministic execution plan.")),
+                revision_count=0,
+            )
+    except Exception as exc:
+        log.warning("LLM plan generation failed, falling back to heuristic: %s", exc)
+
+    return None
+
+
+def _build_llm_revised_plan(
+    original_plan: Plan,
+    validation: ValidationResult,
+    profile: DataProfile,
+    session_id: str,
+    new_plan_id: str,
+    llm_client: Any,
+    revision_count: int,
+) -> Plan | None:
+    """Generate a revised plan via LLM diagnosing failed validation checks."""
+    if not hasattr(llm_client, "generate_structured"):
+        return None
+
+    failed_info = {
+        "checks_failed": validation.checks_failed,
+        "details": validation.details,
+    }
+    prev_steps = [
+        {"step_number": s.step_number, "tool_name": s.tool_name, "parameters": s.parameters, "description": s.description}
+        for s in original_plan.steps
+    ]
+
+    system_prompt = (
+        "You are the DataWise Plan Revision Engine.\n"
+        "A previously generated execution plan failed validation checks. "
+        "Review the failed validation details, diagnose why the steps failed, and produce a corrected, revised step list.\n"
+        "Strictly use only registered deterministic tools.\n"
+        "Return the same JSON format with 'rationale', 'needs_clarification', 'clarification_question', and 'steps'."
+    )
+
+    user_content = (
+        f"Validation Failure Details: {json.dumps(failed_info)}\n\n"
+        f"Previous Plan Steps: {json.dumps(prev_steps)}\n\n"
+        f"Original Objectives: {json.dumps([o.description for o in original_plan.objectives])}\n"
+        f"Columns: {json.dumps([c.name for c in (profile.columns or [])])}"
+    )
+
+    try:
+        data = llm_client.generate_structured(prompt=user_content, system_prompt=system_prompt)
+        raw_steps = data.get("steps", [])
+        if not raw_steps:
+            return None
+
+        parsed_steps: list[Step] = []
+        for i, stp in enumerate(raw_steps, start=1):
+            if isinstance(stp, dict):
+                tname = str(stp.get("tool_name", "")).strip()
+                if tname not in _ALLOWED_TOOL_NAMES:
+                    continue
+                params = stp.get("parameters") or {}
+                if not isinstance(params, dict):
+                    params = {}
+                parsed_steps.append(
+                    Step(
+                        step_number=int(stp.get("step_number", i)),
+                        tool_name=tname,
+                        description=str(stp.get("description", f"Step {i}: {tname}")),
+                        parameters=params,
+                        expected_output=str(stp.get("expected_output", f"Executed {tname}")),
+                    )
+                )
+
+        if parsed_steps:
+            return Plan(
+                plan_id=new_plan_id,
+                session_id=session_id,
+                objectives=original_plan.objectives,
+                steps=parsed_steps,
+                needs_clarification=bool(data.get("needs_clarification", False)),
+                clarification_question=data.get("clarification_question"),
+                rationale=str(data.get("rationale", f"Revised plan after validation failure: {', '.join(validation.checks_failed)}")),
+                revision_count=revision_count,
+            )
+    except Exception as exc:
+        log.warning("LLM plan revision failed, falling back to heuristic: %s", exc)
+
+    return None
+
+
 def create_plan(
     objectives: list[Objective],
     profile: DataProfile,
@@ -832,11 +1043,11 @@ def create_plan(
     if llm_client is not None and llm_call_counter is not None:
         llm_call_counter("build_plan")
 
-    # Phase 4+: LLM path (not yet implemented)
+    # LLM-backed structured planning path
     if llm_client is not None:
-        # TODO Phase 4: build structured prompt from profile + objectives,
-        # parse LLM JSON response into Plan using Pydantic validation.
-        pass
+        llm_plan = _build_llm_plan(objectives, profile, session_id, plan_id, llm_client)
+        if llm_plan is not None:
+            return llm_plan
 
     return _build_heuristic_plan(objectives, profile, session_id, plan_id)
 
@@ -872,11 +1083,19 @@ def revise_plan(
     if llm_client is not None and llm_call_counter is not None:
         llm_call_counter("revise_plan")
 
-    # Phase 4+: smarter LLM-driven revision using validation.details
+    # LLM-driven revision path
     if llm_client is not None:
-        # TODO Phase 4: provide validation.checks_failed + validation.details
-        # to the LLM to generate a targeted fix.
-        pass
+        revised = _build_llm_revised_plan(
+            original_plan,
+            validation,
+            profile,
+            original_plan.session_id,
+            new_plan_id,
+            llm_client,
+            revision_count=original_plan.revision_count + 1,
+        )
+        if revised is not None:
+            return revised
 
     return _build_heuristic_plan(
         original_plan.objectives,

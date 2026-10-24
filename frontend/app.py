@@ -34,7 +34,7 @@ import io
 from pathlib import Path
 import streamlit as st
 
-from frontend.client import call_pipeline, fetch_file, get_api_base, get_capabilities
+from frontend.client import call_pipeline, fetch_file, get_api_base, get_capabilities, get_llm_status
 from frontend.helpers import extract_clarification_question
 
 # ------------------------------------------------------------------------------
@@ -288,11 +288,43 @@ with st.sidebar:
         )
 
     st.markdown("---")
+    st.markdown("**🧠 AI Planning Engine**")
+    llm_status = get_llm_status(API_BASE) if backend_online else None
+    is_llm_active = bool(llm_status and llm_status.get("active"))
+    active_name = llm_status.get("provider_name", "Deterministic Heuristic") if llm_status else "Deterministic Heuristic"
+
+    if is_llm_active:
+        st.success(f"**Online:** {active_name}", icon="✨")
+    else:
+        st.info(f"**Engine:** {active_name}", icon="⚡")
+
+    with st.expander("⚙️ Model & API Key Settings", expanded=False):
+        st.caption("Provide an API key to activate LLM-backed natural-language structured planning:")
+        sel_prov = st.selectbox(
+            "Provider",
+            options=["auto", "gemini", "anthropic", "openai"],
+            format_func=lambda x: {
+                "auto": "Auto-Detect (Environment)",
+                "gemini": "Google Gemini",
+                "anthropic": "Anthropic Claude",
+                "openai": "OpenAI / Local",
+            }.get(x, x),
+            key="llm_provider_select",
+        )
+        key_input = st.text_input("API Key Override", type="password", key="llm_key_input", placeholder="Enter API key...")
+        if key_input:
+            st.session_state["llm_api_key"] = key_input.strip()
+            st.session_state["llm_provider"] = None if sel_prov == "auto" else sel_prov
+        else:
+            st.session_state["llm_api_key"] = None
+            st.session_state["llm_provider"] = None if sel_prov == "auto" else sel_prov
+
+    st.markdown("---")
     st.markdown(
         f'<div style="font-size:0.72rem;color:#6e7681;line-height:1.5;">'
-        f'DataWise v1 MVP · Phase 7<br>'
+        f'DataWise v2 · LLM-Upgraded<br>'
         f'Backend URL: <code style="color:#8b949e">{API_BASE}</code><br>'
-        f'Deterministic execution · Zero mock data'
+        f'Deterministic execution · Zero hallucinations'
         f'</div>',
         unsafe_allow_html=True,
     )
@@ -455,12 +487,17 @@ if run_button:
             time.sleep(0.12)
             pb.progress(pct, text=label)
 
+        llm_k = st.session_state.get("llm_api_key")
+        llm_p = st.session_state.get("llm_provider")
+
         if len(st.session_state.last_files_data) > 1:
             result, is_error = call_pipeline(
                 files_list=st.session_state.last_files_data,
                 prompt=prompt_text.strip(),
                 export_format=export_format,
                 session_id=st.session_state.last_session_id,
+                api_key=llm_k,
+                provider=llm_p,
             )
         else:
             result, is_error = call_pipeline(
@@ -469,6 +506,8 @@ if run_button:
                 prompt=prompt_text.strip(),
                 export_format=export_format,
                 session_id=st.session_state.last_session_id,
+                api_key=llm_k,
+                provider=llm_p,
             )
 
         pb.progress(100, text="Done ✓")
@@ -579,6 +618,8 @@ if result:
                     prompt=clarified_prompt,
                     export_format=st.session_state.last_export_format or "csv",
                     session_id=st.session_state.last_session_id,
+                    api_key=st.session_state.get("llm_api_key"),
+                    provider=st.session_state.get("llm_provider"),
                 )
                 if is_err:
                     st.session_state.api_error = res_clarified

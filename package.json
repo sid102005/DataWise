@@ -1,0 +1,20 @@
+{
+  "name": "datawise",
+  "version": "1.0.0",
+  "description": "DataWise - Autonomous Format-Agnostic Data Processing Agent",
+  "main": "dev.js",
+  "scripts": {
+    "dev": "node dev.js",
+    "start": "node dev.js",
+    "backend": "py -m uvicorn backend.main:app --host 127.0.0.1 --port 8000 --workers 1",
+    "frontend": "py -m streamlit run frontend/app.py --server.port 8501"
+  },
+  "keywords": [
+    "datawise",
+    "data-processing",
+    "fastapi",
+    "streamlit"
+  ],
+  "author": "",
+  "license": "MIT"
+}

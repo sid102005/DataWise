@@ -29,6 +29,8 @@ def call_pipeline(
     session_id: str | None = None,
     api_base: str | None = None,
     files_list: list[tuple[str, bytes]] | None = None,
+    api_key: str | None = None,
+    provider: str | None = None,
 ) -> tuple[dict[str, Any], bool]:
     """Call the backend pipeline endpoint. Returns (result_dict, is_error).
 
@@ -51,6 +53,10 @@ def call_pipeline(
     data: dict[str, Any] = {"prompt": prompt, "export_format": export_format}
     if session_id:
         data["session_id"] = session_id
+    if api_key:
+        data["api_key"] = api_key
+    if provider:
+        data["provider"] = provider
 
     try:
         resp = requests.post(f"{base}/api/pipeline/run", files=files, data=data, timeout=120)
@@ -106,4 +112,17 @@ def get_capabilities(api_base: str | None = None) -> dict[str, Any] | None:
     except Exception:
         pass
     return None
+
+
+def get_llm_status(api_base: str | None = None) -> dict[str, Any] | None:
+    """Fetch live LLM provider status from the backend API."""
+    base = (api_base or get_api_base()).rstrip("/")
+    try:
+        resp = requests.get(f"{base}/api/llm/status", timeout=5)
+        if resp.status_code == 200:
+            return resp.json()
+    except Exception:
+        pass
+    return None
+
 

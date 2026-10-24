@@ -2,10 +2,16 @@ from pathlib import Path
 from typing import Any, Tuple, List, Dict
 import pymupdf as fitz
 from docx import Document as DocxDocument
+from docx.shared import Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
 import re
+import os
+import logging
 
 from backend.processors.base import FileProcessor
 from backend.models.schemas import ValidationResult, Plan, Step
+
+log = logging.getLogger(__name__)
 
 class DocumentProcessor(FileProcessor):
     
@@ -50,9 +56,11 @@ class DocumentProcessor(FileProcessor):
             try:
                 doc = DocxDocument(file_path)
                 profile_data["paragraph_count"] = len(doc.paragraphs)
-                text = " ".join([p.text for p in doc.paragraphs])
-                profile_data["word_count"] = len(text.split())
-                profile_data["has_text_layer"] = True
+                profile_data["table_count"] = len(doc.tables)
+                text = self._extract_text_docx(file_path)
+                clean_text = text.strip()
+                profile_data["word_count"] = len(clean_text.split())
+                profile_data["has_text_layer"] = len(clean_text) > 0
             except Exception:
                 pass
                 
@@ -86,11 +94,56 @@ class DocumentProcessor(FileProcessor):
 
     def _extract_text_docx(self, file_path: Path) -> str:
         doc = DocxDocument(file_path)
-        text = []
-        for p in doc.paragraphs:
-            if p.text.strip():
-                text.append(p.text.strip())
-        return "\n".join(text)
+        lines: list[str] = []
+
+        # 1. Traverse document body elements in visual reading order (paragraphs and tables)
+        try:
+            from docx.oxml.text.paragraph import CT_P
+            from docx.oxml.table import CT_Tbl
+            from docx.text.paragraph import Paragraph
+            from docx.table import Table
+
+            for child in doc.element.body:
+                if isinstance(child, CT_P):
+                    p = Paragraph(child, doc)
+                    if p.text.strip():
+                        lines.append(p.text.strip())
+                elif isinstance(child, CT_Tbl):
+                    t = Table(child, doc)
+                    for row in t.rows:
+                        row_cells = []
+                        seen_cells = set()
+                        for cell in row.cells:
+                            if cell._tc not in seen_cells:
+                                seen_cells.add(cell._tc)
+                                ctext = cell.text.strip()
+                                if ctext:
+                                    row_cells.append(ctext)
+                        if row_cells:
+                            lines.append(" | ".join(row_cells))
+        except Exception as exc:
+            log.warning("XML body traversal failed on %s, falling back to sequential extraction: %s", file_path, exc)
+            # Fallback to standard paragraph and table extraction
+            for p in doc.paragraphs:
+                if p.text.strip():
+                    lines.append(p.text.strip())
+            for t in doc.tables:
+                for row in t.rows:
+                    row_cells = [cell.text.strip() for cell in row.cells if cell.text.strip()]
+                    if row_cells:
+                        lines.append(" | ".join(row_cells))
+
+        # 2. If body is still empty, inspect headers and footers
+        if not lines:
+            for section in doc.sections:
+                for hp in section.header.paragraphs:
+                    if hp.text.strip():
+                        lines.append(hp.text.strip())
+                for fp in section.footer.paragraphs:
+                    if fp.text.strip():
+                        lines.append(fp.text.strip())
+
+        return "\n".join(lines)
         
     def _extract_tables_docx(self, file_path: Path) -> List[List[List[str]]]:
         doc = DocxDocument(file_path)
@@ -102,24 +155,84 @@ class DocumentProcessor(FileProcessor):
             tables.append(grid)
         return tables
 
-    def execute(self, file_path: Path, structured_operation: Any, **kwargs) -> Any:
-        # structured_operation is a Plan
-        ext = file_path.suffix.lower()
+    def _call_llm_analysis(self, text: str, prompt: str) -> str:
+        """Call the LLM to analyze extracted text against the user's prompt.
         
-        # We will execute each step sequentially.
-        # Since document processing might just return extracted text or tables, 
-        # we accumulate results in a dict.
+        Returns the LLM's response as a string, or a fallback if unavailable.
+        """
+        try:
+            api_key = os.environ.get("ANTHROPIC_API_KEY") or os.environ.get("GEMINI_API_KEY")
+            
+            # Try Anthropic Claude first
+            if os.environ.get("ANTHROPIC_API_KEY"):
+                import anthropic
+                client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+                # Truncate to ~15k chars to stay within token limits
+                truncated = text[:15000] + ("\n...[truncated]" if len(text) > 15000 else "")
+                message = client.messages.create(
+                    model="claude-opus-4-5",
+                    max_tokens=2048,
+                    messages=[
+                        {
+                            "role": "user",
+                            "content": (
+                                f"You are a helpful data analyst. The user uploaded a document and asked:\n"
+                                f">>> {prompt}\n\n"
+                                f"Here is the extracted document text:\n\n{truncated}\n\n"
+                                f"Please answer the user's question thoroughly and clearly, "
+                                f"using only information from the document above."
+                            )
+                        }
+                    ]
+                )
+                return message.content[0].text
+            
+            # Try Google Gemini as fallback
+            elif os.environ.get("GEMINI_API_KEY"):
+                import google.generativeai as genai
+                genai.configure(api_key=os.environ["GEMINI_API_KEY"])
+                model = genai.GenerativeModel("gemini-2.0-flash")
+                truncated = text[:15000] + ("\n...[truncated]" if len(text) > 15000 else "")
+                response = model.generate_content(
+                    f"You are a helpful data analyst. The user uploaded a document and asked:\n"
+                    f">>> {prompt}\n\n"
+                    f"Here is the extracted document text:\n\n{truncated}\n\n"
+                    f"Please answer the user's question thoroughly and clearly, "
+                    f"using only information from the document above."
+                )
+                return response.text
+            
+            else:
+                # No LLM available — return structured extraction of the text
+                return f"[No LLM API key configured — raw extracted text]\n\n{text[:5000]}"
+                
+        except Exception as exc:
+            log.warning("LLM analysis failed: %s", exc)
+            return f"[LLM analysis failed: {exc}]\n\nRaw extracted text:\n{text[:5000]}"
+
+    def execute(self, file_path: Path, structured_operation: Any, **kwargs) -> Any:
+        """Execute document processing steps.
+        
+        The `prompt` kwarg (if provided via output_dir parent context) is used
+        to run LLM-powered analysis on the extracted text.
+        """
+        ext = file_path.suffix.lower()
+        # Retrieve the original user prompt if passed through kwargs
+        user_prompt: str = kwargs.get("prompt", "")
+        output_dir: Path | None = kwargs.get("output_dir", None)
         
         results = {
             "text": "",
+            "analysis": "",
             "tables": [],
             "metadata": {},
             "word_count": 0,
             "headings": [],
-            "step_results": []
+            "step_results": [],
+            "user_prompt": user_prompt,
         }
         
-        # Pre-load text if needed for general operations
+        # Pre-load text
         base_text = ""
         if ext == ".pdf":
             base_text = self._extract_text_pdf(file_path)
@@ -133,16 +246,17 @@ class DocumentProcessor(FileProcessor):
             
             if tool == "extract_text":
                 results["text"] = base_text
+                # If there's a user prompt, run LLM analysis on the extracted text
+                if user_prompt and base_text and base_text != "No extractable text, OCR unavailable":
+                    results["analysis"] = self._call_llm_analysis(base_text, user_prompt)
                 
             elif tool == "extract_text_ocr":
-                # OCR is disabled
                 raise ValueError("OCR is not supported on this system (Tesseract missing).")
                 
             elif tool == "extract_tables":
                 if ext == ".docx":
                     results["tables"] = self._extract_tables_docx(file_path)
                 elif ext == ".pdf":
-                    # PDF table extraction using PyMuPDF (simple heuristic)
                     doc = fitz.open(file_path)
                     for page in doc:
                         tabs = page.find_tables()
@@ -156,13 +270,15 @@ class DocumentProcessor(FileProcessor):
                 results["metadata"] = self.profile(file_path)
                 
             elif tool == "convert_format":
-                # text is already extracted. the export method will handle saving it to target_format
                 results["text"] = base_text
+                if user_prompt and base_text and base_text != "No extractable text, OCR unavailable":
+                    results["analysis"] = self._call_llm_analysis(base_text, user_prompt)
                 
             elif tool == "clean_text":
-                # whitespace normalization
                 cleaned = re.sub(r'\s+', ' ', base_text).strip()
                 results["text"] = cleaned
+                if user_prompt and cleaned:
+                    results["analysis"] = self._call_llm_analysis(cleaned, user_prompt)
                 
             elif tool == "count_words":
                 results["word_count"] = len(base_text.split())
@@ -183,22 +299,20 @@ class DocumentProcessor(FileProcessor):
                             headings.append(p.text.strip())
                     results["headings"] = headings
                 elif ext == ".pdf":
-                    # Heuristic based heading detection for PDF (e.g. font size > 12)
                     doc = fitz.open(file_path)
                     headings = []
                     for page in doc:
                         blocks = page.get_text("dict")["blocks"]
                         for b in blocks:
                             if "lines" in b:
-                                for l in b["lines"]:
-                                    for s in l["spans"]:
+                                for ln in b["lines"]:
+                                    for s in ln["spans"]:
                                         if s["size"] > 14 and s["text"].strip():
                                             headings.append(s["text"].strip())
                     doc.close()
                     results["headings"] = headings
 
             from backend.models.schemas import ExecutionResult
-            import time
             results["step_results"].append(
                 ExecutionResult(
                     step_number=step.step_number,
@@ -297,13 +411,137 @@ class DocumentProcessor(FileProcessor):
         return ValidationResult(is_valid=True, checks_passed=checks_passed, checks_failed=[])
 
     def export(self, state: Any, output_format: str, output_dir: Path, filename_stem: str = "result") -> Path:
+        """Export document analysis results to the requested format.
+        
+        Supported formats: txt, md, json, pdf, docx
+        The export uses `analysis` (LLM output) when available, falling back to `text`.
+        """
         output_format = output_format.lower().lstrip(".")
-        output_file = output_dir / f"result.{output_format}"
+        output_file = output_dir / f"{filename_stem}.{output_format}"
+        
+        # Content to write: prefer LLM analysis over raw extracted text
+        content = state.get("analysis") or state.get("text") or ""
+        user_prompt = state.get("user_prompt", "Document Analysis")
         
         if output_format in {"txt", "md"}:
-            output_file.write_text(state.get("text", ""), encoding="utf-8")
+            output_file.write_text(content, encoding="utf-8")
+            
         elif output_format == "json":
             import json
-            output_file.write_text(json.dumps(state, indent=2), encoding="utf-8")
+            # Produce a clean, serialisable dict (exclude non-serialisable items)
+            export_state = {
+                "analysis": content,
+                "word_count": state.get("word_count", 0),
+                "headings": state.get("headings", []),
+                "metadata": state.get("metadata", {}),
+                "tables": state.get("tables", []),
+            }
+            output_file.write_text(json.dumps(export_state, indent=2, ensure_ascii=False), encoding="utf-8")
+            
+        elif output_format == "pdf":
+            try:
+                from reportlab.lib.pagesizes import letter
+                from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+                from reportlab.lib.units import inch
+                from reportlab.lib import colors
+                from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer
+                from reportlab.lib.enums import TA_LEFT, TA_CENTER
+
+                doc = SimpleDocTemplate(
+                    str(output_file),
+                    pagesize=letter,
+                    rightMargin=inch,
+                    leftMargin=inch,
+                    topMargin=inch,
+                    bottomMargin=inch,
+                )
+                styles = getSampleStyleSheet()
+                
+                title_style = ParagraphStyle(
+                    "CustomTitle",
+                    parent=styles["Title"],
+                    fontSize=18,
+                    spaceAfter=20,
+                    textColor=colors.HexColor("#1e3a5f"),
+                )
+                body_style = ParagraphStyle(
+                    "CustomBody",
+                    parent=styles["Normal"],
+                    fontSize=11,
+                    leading=16,
+                    spaceAfter=8,
+                )
+
+                story = []
+                story.append(Paragraph("DataWise — Document Analysis", title_style))
+                story.append(Paragraph(f"<b>Query:</b> {user_prompt}", body_style))
+                story.append(Spacer(1, 0.25 * inch))
+                
+                # Split content into paragraphs and render each
+                for para in content.split("\n"):
+                    para = para.strip()
+                    if not para:
+                        story.append(Spacer(1, 0.1 * inch))
+                        continue
+                    # Escape XML-sensitive chars for ReportLab
+                    safe = para.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+                    story.append(Paragraph(safe, body_style))
+
+                doc.build(story)
+                
+            except Exception as exc:
+                log.exception("PDF export failed: %s", exc)
+                # Fallback: write as plain text with .pdf extension note
+                output_file.with_suffix(".txt").write_text(content, encoding="utf-8")
+                output_file = output_dir / f"{filename_stem}.txt"
+                
+        elif output_format == "docx":
+            try:
+                doc = DocxDocument()
+                
+                # Title
+                title = doc.add_heading("DataWise — Document Analysis", level=0)
+                title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+                
+                # Query subtitle
+                query_para = doc.add_paragraph()
+                run = query_para.add_run(f"Query: {user_prompt}")
+                run.bold = True
+                run.font.size = Pt(11)
+                run.font.color.rgb = RGBColor(0x1e, 0x3a, 0x5f)
+                doc.add_paragraph()  # spacer
+                
+                # Body content — split by newline
+                for line in content.split("\n"):
+                    line = line.strip()
+                    if not line:
+                        doc.add_paragraph()
+                        continue
+                    # Detect markdown-style headings
+                    if line.startswith("### "):
+                        doc.add_heading(line[4:], level=3)
+                    elif line.startswith("## "):
+                        doc.add_heading(line[3:], level=2)
+                    elif line.startswith("# "):
+                        doc.add_heading(line[2:], level=1)
+                    elif line.startswith(("* ", "- ", "• ")):
+                        p = doc.add_paragraph(style="List Bullet")
+                        p.add_run(line[2:])
+                    elif re.match(r'^\d+\.\s', line):
+                        p = doc.add_paragraph(style="List Number")
+                        p.add_run(re.sub(r'^\d+\.\s', '', line))
+                    else:
+                        doc.add_paragraph(line)
+                
+                doc.save(str(output_file))
+                
+            except Exception as exc:
+                log.exception("DOCX export failed: %s", exc)
+                output_file.with_suffix(".txt").write_text(content, encoding="utf-8")
+                output_file = output_dir / f"{filename_stem}.txt"
+        else:
+            # Unknown format — write as plain text
+            output_file = output_dir / f"{filename_stem}.txt"
+            output_file.write_text(content, encoding="utf-8")
             
         return output_file

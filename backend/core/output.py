@@ -158,18 +158,19 @@ def synthesize_plain_english_summary(
     failed = [r for r in step_results if not r.success]
 
     if successful:
-        # Sentence 1: overall row transformation
+        # Sentence 1: overall row transformation (tabular only)
         first = successful[0]
         last = successful[-1]
-        if first.rows_before != last.rows_after:
-            delta = first.rows_before - last.rows_after
-            direction = "reduced" if delta > 0 else "increased"
-            parts.append(
-                f"Processed {first.rows_before:,} rows → "
-                f"{last.rows_after:,} rows ({direction} by {abs(delta):,})."
-            )
-        else:
-            parts.append(f"Processed {first.rows_before:,} rows (row count unchanged).")
+        if first.rows_before > 0 or last.rows_after > 0:
+            if first.rows_before != last.rows_after:
+                delta = first.rows_before - last.rows_after
+                direction = "reduced" if delta > 0 else "increased"
+                parts.append(
+                    f"Processed {first.rows_before:,} rows → "
+                    f"{last.rows_after:,} rows ({direction} by {abs(delta):,})."
+                )
+            else:
+                parts.append(f"Processed {first.rows_before:,} rows (row count unchanged).")
 
         # Sentence 2+: per-step summaries (use the tool's own summary string)
         for r in successful:

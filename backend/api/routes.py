@@ -89,6 +89,8 @@ async def run_pipeline(
     prompt: str = Form(..., description="Natural-language processing instruction"),
     session_id: str | None = Form(default=None, description="Optional existing session ID"),
     export_format: str = Form(default="csv", description="Output format: csv, xlsx, json, or archive"),
+    api_key: str | None = Form(default=None, description="Optional LLM API key override"),
+    provider: str | None = Form(default=None, description="Optional LLM provider override (gemini/anthropic/openai)"),
 ) -> PipelineOutput | JSONResponse:
     """Execute the full DataWise pipeline for single or multi-file uploads."""
     if session_id:
@@ -113,7 +115,9 @@ async def run_pipeline(
             },
         )
 
-    pipeline = DataWisePipeline()
+    from backend.core.llm_provider import get_default_llm_provider
+    llm_client = get_default_llm_provider(explicit_key=api_key, explicit_provider=provider)
+    pipeline = DataWisePipeline(llm_client=llm_client)
 
     try:
         if len(uploaded_list) == 1:
@@ -200,6 +204,18 @@ async def run_pipeline(
                 "error_code": getattr(exc, "error_code", "DATAWISE_ERROR"),
                 "message": getattr(exc, "message", str(exc)),
                 "details": getattr(exc, "details", None),
+            },
+        )
+    except ValueError as exc:
+        log.warning("Operation validation or execution issue: %s", exc)
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": True,
+                "status": "error",
+                "error_code": "UNSUPPORTED_OPERATION",
+                "message": str(exc),
+                "details": None,
             },
         )
     except Exception as exc:
@@ -402,4 +418,21 @@ async def get_capabilities() -> dict:
         "supported_categories": active_categories,
         "processors": processors_info,
     }
+
+
+@router.get(
+    "/llm/status",
+    summary="Get active LLM provider status",
+    description="Check whether an LLM provider is active or if deterministic fallback is in use.",
+)
+async def get_llm_status() -> dict[str, Any]:
+    """Return active LLM provider name and supported providers."""
+    from backend.core.llm_provider import get_default_llm_provider
+    provider = get_default_llm_provider()
+    return {
+        "active": provider is not None,
+        "provider_name": provider.get_provider_name() if provider else "Deterministic Heuristic Engine",
+        "supported_providers": ["gemini", "anthropic", "openai", "local_openai"],
+    }
+
 

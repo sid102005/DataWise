@@ -152,7 +152,24 @@ class ImageProcessor(FileProcessor):
                 metadata = self.profile(file_path)
 
             elif tool == "extract_text_ocr":
-                raise ValueError("OCR is not supported on this system (Tesseract missing).")
+                import shutil
+                tesseract_cmd = shutil.which("tesseract") or (
+                    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+                    if Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe").exists()
+                    else None
+                )
+                if tesseract_cmd:
+                    try:
+                        import pytesseract
+                        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
+                        extracted = pytesseract.image_to_string(current_img)
+                        if metadata is None:
+                            metadata = {}
+                        metadata["extracted_text"] = extracted
+                    except Exception as err:
+                        raise ValueError(f"OCR execution failed: {err}")
+                else:
+                    raise ValueError("OCR is not supported on this system (Tesseract missing).")
 
             else:
                 raise FileValidationError(f"Unsupported image tool: {tool}")
@@ -325,7 +342,11 @@ class ImageProcessor(FileProcessor):
                     checks_passed.append("metadata_extracted: true")
 
             elif tool == "extract_text_ocr":
-                errors.append("extract_text_ocr failed: OCR is not supported on this system (Tesseract missing).")
+                meta = after_state.get("metadata", {}) if isinstance(after_state, dict) else {}
+                if meta and "extracted_text" in meta:
+                    checks_passed.append("ocr_text_extracted: true")
+                else:
+                    errors.append("extract_text_ocr failed: OCR is not supported on this system (Tesseract missing).")
 
         if errors:
             return ValidationResult(is_valid=False, checks_passed=checks_passed, checks_failed=errors)
@@ -341,6 +362,15 @@ class ImageProcessor(FileProcessor):
     ) -> Path:
         """Export the final processed image to disk."""
         output_format = output_format.lower().lstrip(".")
+
+        # Check if text export was requested and extracted text is present
+        if isinstance(state, dict) and output_format in {"txt", "md"}:
+            meta = state.get("metadata", {})
+            if isinstance(meta, dict) and "extracted_text" in meta:
+                output_file = output_dir / f"{filename_stem}.txt"
+                output_file.write_text(meta["extracted_text"], encoding="utf-8")
+                return output_file
+
         if output_format in {"csv", "xlsx", "txt", "md"}:
             output_format = state.get("target_format") or (Path(state.get("source_file")).suffix.lower().lstrip(".") if state.get("source_file") else "png")
         output_file = output_dir / f"{filename_stem}.{output_format}"

@@ -28,10 +28,14 @@ NLU DESIGN (Emergency Fix — Root Cause H1/H3):
 
 from __future__ import annotations
 
+import json
+import logging
 import re
 from typing import Any
 
 from backend.models.schemas import DataProfile, Objective, ObjectiveCategory
+
+log = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +184,10 @@ def _extract_column_operations(
 
     Returns [] if no column operation is detected.
     """
-    col_map = {c.name.lower(): c.name for c in (profile.columns or [])}
+    if not profile.columns:
+        return []
+
+    col_map = {c.name.lower(): c.name for c in profile.columns}
     objectives: list[Objective] = []
     seen_descriptions: set[str] = set()  # deduplicate across patterns
 
@@ -220,7 +227,7 @@ def _extract_column_operations(
                             category=ObjectiveCategory.TRANSFORM,
                             description=(
                                 f"drop_column_not_found: {raw_col} | "
-                                f"available: {', '.join(c.name for c in profile.columns)}"
+                                f"available: {', '.join(c.name for c in (profile.columns or []))}"
                             ),
                             target_columns=[],
                         )
@@ -260,7 +267,7 @@ def _extract_column_operations(
                         category=ObjectiveCategory.TRANSFORM,
                         description=(
                             f"rename_column_not_found: {old_col_raw} | "
-                            f"available: {', '.join(c.name for c in profile.columns)}"
+                            f"available: {', '.join(c.name for c in (profile.columns or []))}"
                         ),
                         target_columns=[],
                     )
@@ -300,6 +307,93 @@ def _parse_deterministic(prompt: str, profile: DataProfile) -> list[Objective]:
     return objectives
 
 
+def _parse_with_llm(
+    prompt: str,
+    profile: DataProfile,
+    llm_client: Any,
+) -> list[Objective] | None:
+    """Attempt LLM-backed intent parsing with strict Pydantic validation."""
+    if not hasattr(llm_client, "generate_structured"):
+        return None
+
+    columns_summary = [
+        {"name": c.name, "type": c.inferred_type.value, "null_count": c.null_count}
+        for c in (profile.columns or [])
+    ]
+
+    system_prompt = (
+        "You are the DataWise Intent Parser. Translate the user's natural language data instruction "
+        "into an ordered list of discrete, structured objectives.\n\n"
+        "Allowed Objective categories:\n"
+        "- clean: remove duplicates, handle missing values, standardize formats\n"
+        "- transform: filter rows, drop/rename/add columns, change types\n"
+        "- aggregate: groupby summaries, sort, top-N ranking\n"
+        "- visualize: charts (bar, line, pie)\n"
+        "- stat: statistical correlations, distributions\n"
+        "- extract: text or table extraction\n"
+        "- compare: compare datasets or groups\n"
+        "- report: summary report generation\n\n"
+        "Respond ONLY with a valid JSON object matching:\n"
+        "{\n"
+        '  "objectives": [\n'
+        '    {\n'
+        '      "category": "clean|transform|aggregate|visualize|stat|extract|compare|report",\n'
+        '      "description": "Clear explanation of what this objective does",\n'
+        '      "target_columns": ["col1", "col2"],\n'
+        '      "parameters": {"key": "value"}\n'
+        '    }\n'
+        '  ]\n'
+        "}"
+    )
+
+    user_content = (
+        f"User instruction: \"{prompt}\"\n\n"
+        f"Dataset format: {profile.file_format}\n"
+        f"Available columns: {json.dumps(columns_summary)}\n"
+        f"Row count: {getattr(profile, 'row_count', 'unknown')}"
+    )
+
+    try:
+        data = llm_client.generate_structured(
+            prompt=user_content,
+            system_prompt=system_prompt,
+        )
+        raw_objs = data.get("objectives", [])
+        if not raw_objs and isinstance(data, list):
+            raw_objs = data
+
+        parsed_objectives: list[Objective] = []
+        for item in raw_objs:
+            if isinstance(item, dict):
+                cat_str = str(item.get("category", "")).lower().strip()
+                try:
+                    category = ObjectiveCategory(cat_str)
+                except ValueError:
+                    category = ObjectiveCategory.CLEAN
+
+                params = item.get("parameters") or {}
+                if not isinstance(params, dict):
+                    params = {}
+
+                # Filter target_columns to valid strings
+                cols = [str(c) for c in item.get("target_columns", []) if isinstance(c, (str, int, float))]
+
+                parsed_objectives.append(
+                    Objective(
+                        category=category,
+                        description=str(item.get("description", prompt[:120])),
+                        target_columns=cols,
+                        parameters=params,
+                    )
+                )
+        if parsed_objectives:
+            return parsed_objectives
+    except Exception as exc:
+        log.warning("LLM intent parsing failed, falling back to deterministic: %s", exc)
+
+    return None
+
+
 def parse_intent(
     prompt: str,
     profile: DataProfile,
@@ -326,14 +420,14 @@ def parse_intent(
             )
         ]
 
-    # Track budget when LLM path is active
+    # Track budget when LLM path is active (required for budget tests)
     if llm_client is not None and llm_call_counter is not None:
         llm_call_counter("parse_intent")
 
-    # Phase 4+: LLM path (not yet implemented — falls through to deterministic)
+    # LLM-backed structured intent parsing path
     if llm_client is not None:
-        # TODO Phase 4: call llm_client with profile JSON + prompt,
-        # parse structured JSON response into Objective list.
-        pass
+        llm_objs = _parse_with_llm(prompt, profile, llm_client)
+        if llm_objs:
+            return llm_objs
 
     return _parse_deterministic(prompt, profile)
