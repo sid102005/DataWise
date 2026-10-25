@@ -67,13 +67,15 @@ curl -X POST "http://127.0.0.1:8000/api/pipeline/run" `
 
 ### Test files
 
-| File | Path |
-| :--- | :--- |
-| Messy CSV | `test_files/tabular/messy_customers.csv` |
-| Messy JSON | `test_files/tabular/messy_customers.json` |
-| Messy Excel | `test_files/tabular/messy_customers.xlsx` |
+| File | Path | Use for |
+| :--- | :--- | :--- |
+| Messy CSV / JSON / Excel | `test_files/tabular/messy_customers.*` | ML clean |
+| Sales by region | `test_files/tabular/sales_by_region.csv` (also `.json` / `.xlsx`) | Bar/pie charts + convert |
+| Monthly revenue | `test_files/tabular/monthly_revenue.csv` | Line charts |
+| Product mix | `test_files/tabular/product_mix.csv` | Pie / bar charts |
+| Store sales (multi-row) | `test_files/tabular/store_sales.csv` | Bar chart with auto groupby |
 
-Also see older samples under `test_data/` and `tests/fixtures/sample.csv`.
+Also see `test_files/tabular/CHARTS_README.md`, plus older samples under `test_data/` and `tests/fixtures/sample.csv`.
 
 ### What `clean_for_ml` does
 
@@ -103,18 +105,49 @@ When you ask to clean tabular data, DataWise:
 | `top 5 by Purchase` | Sort + top N |
 | `remove the Phone column` | Drop column (if present) |
 
+### Convert formats (CSV ↔ JSON ↔ Excel)
+
+The UI export dropdown is a default only — **convert wording in the prompt overrides it**.
+
+| Prompt | Expected |
+| :--- | :--- |
+| `convert this csv to json` | Download `.json` |
+| `convert this json to csv` | Download `.csv` |
+| `convert to xlsx` / `convert to excel` | Download `.xlsx` |
+| `save as json` | Download `.json` |
+
+Upload `sales_by_region.csv` (or `.json` / `.xlsx`) and use any prompt above.
+
+### Charts (simple commands)
+
+Use the clean chart fixtures (not `messy_customers` until after clean). Column names in the prompt should match the file headers.
+
+| File | Prompt |
+| :--- | :--- |
+| `sales_by_region.csv` | `bar chart of Sales by Region` |
+| `sales_by_region.csv` | `pie chart of Sales by Region` |
+| `monthly_revenue.csv` | `line chart of Revenue by Month` |
+| `product_mix.csv` | `pie chart of Units by Product` |
+| `store_sales.csv` | `bar chart of Sales by Region` (sums stores first) |
+
+Charts appear in the result artifacts / preview as PNG. Leave export as CSV unless you also want a converted download.
+
 ### How to test (manual)
 
 1. Upload `test_files/tabular/messy_customers.csv`.
 2. Prompt: `clean this for ML`.
 3. Confirm rows drop (dupes gone), empty/constant columns removed, download works.
 4. Repeat with `.json` and `.xlsx`.
+5. Upload `sales_by_region.csv` → `convert this csv to json` → download JSON.
+6. Upload `sales_by_region.csv` → `bar chart of Sales by Region` → confirm chart PNG.
 
 ### How to test (API smoke)
 
 ```powershell
 .venv\Scripts\Activate.ps1
 python -c "import httpx; from pathlib import Path; p=Path('test_files/tabular/messy_customers.csv'); r=httpx.post('http://127.0.0.1:8000/api/pipeline/run', data={'prompt':'clean this for ML'}, files={'file':(p.name,p.read_bytes(),'text/csv')}, timeout=120); print(r.json()['status'], r.json()['total_rows'], r.json()['preview_columns'])"
+python -c "import httpx; from pathlib import Path; p=Path('test_files/tabular/sales_by_region.csv'); r=httpx.post('http://127.0.0.1:8000/api/pipeline/run', data={'prompt':'convert this csv to json','export_format':'csv'}, files={'file':(p.name,p.read_bytes(),'text/csv')}, timeout=120); j=r.json(); print(j['status'], j.get('result_filename'), j.get('summary'))"
+python -c "import httpx; from pathlib import Path; p=Path('test_files/tabular/sales_by_region.csv'); r=httpx.post('http://127.0.0.1:8000/api/pipeline/run', data={'prompt':'bar chart of Sales by Region'}, files={'file':(p.name,p.read_bytes(),'text/csv')}, timeout=120); j=r.json(); print(j['status'], [a.get('filename') for a in j.get('artifacts') or []])"
 ```
 
 ---

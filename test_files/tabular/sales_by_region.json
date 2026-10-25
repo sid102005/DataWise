@@ -1,0 +1,22 @@
+[
+  {
+    "Region":"North",
+    "Sales":12500,
+    "Orders":42
+  },
+  {
+    "Region":"South",
+    "Sales":9800,
+    "Orders":35
+  },
+  {
+    "Region":"East",
+    "Sales":15200,
+    "Orders":51
+  },
+  {
+    "Region":"West",
+    "Sales":11000,
+    "Orders":38
+  }
+]

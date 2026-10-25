@@ -49,10 +49,14 @@ _KEYWORD_MAP: list[tuple[re.Pattern[str], ObjectiveCategory]] = [
     ), ObjectiveCategory.CLEAN),
     (re.compile(r"\b(group|grouping|aggregat\w*|sum|average|avg|count|min|max|total)\b", re.I), ObjectiveCategory.AGGREGATE),
     (re.compile(r"\b(sort|rank|top[\s-]?\d+|bottom[\s-]?\d+|highest|lowest|largest|smallest)\b", re.I), ObjectiveCategory.AGGREGATE),
-    (re.compile(r"\b(chart|plot|graph|visuali[sz]\w*|bar|line|pie)\b", re.I), ObjectiveCategory.VISUALIZE),
+    (re.compile(r"\b(chart|plot|graph|visuali[sz]\w*|bar\s*chart|line\s*chart|pie\s*chart)\b", re.I), ObjectiveCategory.VISUALIZE),
     # "only" kept for filter-style prompts ("only Region = East"); select extractors run first.
     (re.compile(r"\b(filter|where|only|exclude|keep|remove row)\b", re.I), ObjectiveCategory.TRANSFORM),
-    (re.compile(r"\b(rename|reorder|add column|derive|calculate|compute|select column|display column)\b", re.I), ObjectiveCategory.TRANSFORM),
+    (re.compile(
+        r"\b(rename|reorder|add column|derive|calculate|compute|select column|display column|"
+        r"convert|export\s+as|save\s+as)\b",
+        re.I,
+    ), ObjectiveCategory.TRANSFORM),
     (re.compile(r"\b(correlat\w*|distribut\w*|stat\w*|mean|median|std|outlier\w*)\b", re.I), ObjectiveCategory.STAT),
     (re.compile(
         r"\b(extract|pull|find|list|show me|ocr|heading|outline|table|tables|"
@@ -458,6 +462,31 @@ def _extract_aggregate_operations(prompt: str, profile: DataProfile) -> list[Obj
     return []
 
 
+def _extract_convert_operation(prompt: str) -> list[Objective]:
+    """Detect tabular/document format conversion intents (csv/xlsx/json)."""
+    text = prompt.strip()
+    m = re.search(
+        r"\b(?:convert|export|save|download|output|change|write)\b"
+        r".*?\b(?:to|as|into)\s+(csv|xlsx|excel|json)\b"
+        r"|\b(?:to|as|into)\s+(csv|xlsx|excel|json)\b"
+        r"|\b(csv|xlsx|excel|json)\s+format\b",
+        text,
+        re.I,
+    )
+    if not m:
+        return []
+    raw = next(g for g in m.groups() if g).lower()
+    fmt = "xlsx" if raw == "excel" else raw
+    return [
+        Objective(
+            category=ObjectiveCategory.TRANSFORM,
+            description=f"convert_to: {fmt}",
+            target_columns=[],
+            parameters={"export_format": fmt},
+        )
+    ]
+
+
 def _parse_deterministic(prompt: str, profile: DataProfile) -> list[Objective]:
     """Rule-based fallback parser. Returns at least one Objective."""
 
@@ -476,7 +505,12 @@ def _parse_deterministic(prompt: str, profile: DataProfile) -> list[Objective]:
     if agg_ops:
         return agg_ops
 
-    # 4. General keyword → category mapping
+    # 4. Format conversion (csv ↔ json ↔ xlsx)
+    convert_ops = _extract_convert_operation(prompt)
+    if convert_ops:
+        return convert_ops
+
+    # 5. General keyword → category mapping
     detected: list[ObjectiveCategory] = []
     for pattern, category in _KEYWORD_MAP:
         if pattern.search(prompt) and category not in detected:

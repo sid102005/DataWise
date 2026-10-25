@@ -273,29 +273,137 @@ def _steps_for_aggregate(
     return steps
 
 
+def _fuzzy_col(name: str, profile: DataProfile) -> str | None:
+    """Case-insensitive / substring column match against the profile."""
+    if not name or not profile.columns:
+        return None
+    cleaned = re.sub(r"[^A-Za-z0-9_]+", " ", name).strip().lower()
+    col_map = {c.name.lower(): c.name for c in profile.columns}
+    if cleaned in col_map:
+        return col_map[cleaned]
+    # singular/plural light touch
+    for key, actual in col_map.items():
+        if cleaned.rstrip("s") == key.rstrip("s") or cleaned in key or key in cleaned:
+            return actual
+    return None
+
+
 def _steps_for_visualize(
     profile: DataProfile,
     step_offset: int,
+    objectives: list[Objective] | None = None,
 ) -> list[Step]:
-    """Generate a bar chart step if suitable columns exist."""
+    """Generate chart steps, preferring columns named in the prompt."""
     steps: list[Step] = []
     n = step_offset
+    objectives = objectives or []
+    full_text = " ".join(o.description for o in objectives)
 
     numeric_cols = _numeric_columns(profile)
     id_names = {c.lower() for c in _id_columns(profile)}
-    # Find a non-ID string column for X-axis labels
-    label_col = next(
-        (c.name for c in profile.columns
-         if c.inferred_type not in {InferredType.NUMERIC, InferredType.DATE, InferredType.ID}),
-        None,
-    )
-    value_col = next(
-        (c for c in numeric_cols if c.lower() not in id_names),
-        None,
-    )
+    label_cols = [
+        c.name for c in (profile.columns or [])
+        if c.inferred_type not in {InferredType.NUMERIC, InferredType.DATE, InferredType.ID}
+    ]
 
-    if label_col and value_col:
+    label_col: str | None = None
+    value_col: str | None = None
+
+    # "of <y> by <x>" / "<y> by <x>" / "<x> vs <y>"
+    m = re.search(
+        r"(?:of|for)\s+([A-Za-z0-9_ ]+?)\s+by\s+([A-Za-z0-9_ ]+?)(?:\s|$|,|\.|\"|')",
+        full_text,
+        re.I,
+    )
+    if m:
+        value_col = _fuzzy_col(m.group(1), profile)
+        label_col = _fuzzy_col(m.group(2), profile)
+    if not (label_col and value_col):
+        m2 = re.search(
+            r"\b([A-Za-z0-9_]+)\s+(?:vs\.?|versus)\s+([A-Za-z0-9_]+)\b",
+            full_text,
+            re.I,
+        )
+        if m2:
+            a = _fuzzy_col(m2.group(1), profile)
+            b = _fuzzy_col(m2.group(2), profile)
+            if a and b:
+                # Prefer categorical on X
+                if a in label_cols:
+                    label_col, value_col = a, b
+                elif b in label_cols:
+                    label_col, value_col = b, a
+                else:
+                    label_col, value_col = a, b
+
+    # Named columns mentioned anywhere
+    if not label_col:
+        for c in label_cols:
+            if re.search(rf"\b{re.escape(c)}\b", full_text, re.I):
+                label_col = c
+                break
+    if not value_col:
+        for c in numeric_cols:
+            if c.lower() in id_names:
+                continue
+            if re.search(rf"\b{re.escape(c)}\b", full_text, re.I):
+                value_col = c
+                break
+
+    if not label_col:
+        label_col = label_cols[0] if label_cols else None
+    if not value_col:
+        value_col = next((c for c in numeric_cols if c.lower() not in id_names), None)
+
+    if not label_col or not value_col:
+        return steps
+
+    # Aggregate when the category column is not unique (better charts)
+    label_info = next((c for c in (profile.columns or []) if c.name == label_col), None)
+    needs_group = bool(
+        profile.row_count
+        and label_info
+        and label_info.unique_count > 0
+        and label_info.unique_count < profile.row_count
+    )
+    if needs_group:
         n += 1
+        steps.append(Step(
+            step_number=n,
+            tool_name="groupby_aggregate",
+            description=f"Aggregate '{value_col}' by '{label_col}' (sum) for charting.",
+            parameters={"by": label_col, "metric": value_col, "agg": "sum"},
+            expected_output=f"One row per '{label_col}' with summed '{value_col}'.",
+        ))
+
+    chart_kind = "bar_chart"
+    if re.search(r"\bpie\b", full_text, re.I):
+        chart_kind = "pie_chart"
+    elif re.search(r"\bline\b", full_text, re.I):
+        chart_kind = "line_chart"
+
+    n += 1
+    if chart_kind == "pie_chart":
+        steps.append(Step(
+            step_number=n,
+            tool_name="pie_chart",
+            description=f"Generate pie chart: '{label_col}' vs '{value_col}'.",
+            parameters={
+                "labels": label_col,
+                "values": value_col,
+                "title": f"{value_col} by {label_col}",
+            },
+            expected_output="A PNG pie chart file is created.",
+        ))
+    elif chart_kind == "line_chart":
+        steps.append(Step(
+            step_number=n,
+            tool_name="line_chart",
+            description=f"Generate line chart: '{label_col}' (x) vs '{value_col}' (y).",
+            parameters={"x": label_col, "y": value_col, "title": f"{value_col} by {label_col}"},
+            expected_output="A PNG line chart file is created.",
+        ))
+    else:
         steps.append(Step(
             step_number=n,
             tool_name="bar_chart",
@@ -1044,14 +1152,21 @@ def _build_heuristic_plan(
 
     if ObjectiveCategory.TRANSFORM in categories:
         trans_objs = [o for o in objectives if o.category == ObjectiveCategory.TRANSFORM]
-        all_steps.extend(_steps_for_transform(trans_objs, profile, len(all_steps)))
+        # Format-only convert (convert_to: csv|xlsx|json) needs no execute step —
+        # export_format is applied at Stage 6 by the pipeline. Record it in rationale via a
+        # lightweight annotate step that the tabular path treats as a no-op rename identity…
+        # Actually: keep convert objectives out of tool steps; pipeline sets export_format.
+        actionable = [o for o in trans_objs if not o.description.startswith("convert_to:")]
+        if actionable:
+            all_steps.extend(_steps_for_transform(actionable, profile, len(all_steps)))
 
     if ObjectiveCategory.AGGREGATE in categories:
         agg_objs = [o for o in objectives if o.category == ObjectiveCategory.AGGREGATE]
         all_steps.extend(_steps_for_aggregate(agg_objs, profile, len(all_steps)))
 
     if ObjectiveCategory.VISUALIZE in categories:
-        all_steps.extend(_steps_for_visualize(profile, len(all_steps)))
+        viz_objs = [o for o in objectives if o.category == ObjectiveCategory.VISUALIZE]
+        all_steps.extend(_steps_for_visualize(profile, len(all_steps), viz_objs))
 
     # Do NOT fall back to unrelated clean steps when transform/aggregate matched
     # no tools — that caused "show only 2 columns" to silently dedupe/impute instead.

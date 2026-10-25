@@ -26,6 +26,7 @@ ARCHITECTURE CONTRACT [FIX F2 + FIX F9]:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -92,6 +93,40 @@ _PREVIEW_MAX_ROWS: int = 50
 
 # Default export format
 _DEFAULT_EXPORT_FORMAT: str = "csv"
+
+
+def infer_export_format_from_prompt(prompt: str, current: str = _DEFAULT_EXPORT_FORMAT) -> str:
+    """Override export format when the user asks to convert/save as csv|xlsx|json."""
+    text = (prompt or "").strip()
+    m = re.search(
+        r"\b(?:convert|export|save|download|output|change|write)\b"
+        r".*?\b(?:to|as|into)\s+(csv|xlsx|excel|json)\b"
+        r"|\b(?:to|as|into)\s+(csv|xlsx|excel|json)\b",
+        text,
+        re.I,
+    )
+    if not m:
+        # Also honour structured convert objectives later via parameters
+        return current
+    raw = next(g for g in m.groups() if g).lower()
+    return "xlsx" if raw == "excel" else raw
+
+
+def resolve_export_format(prompt: str, objectives: list, current: str) -> str:
+    """Prefer explicit convert objective params, then prompt inference, then UI default."""
+    for obj in objectives or []:
+        params = getattr(obj, "parameters", None) or {}
+        fmt = params.get("export_format")
+        if isinstance(fmt, str) and fmt.lower() in {"csv", "xlsx", "json"}:
+            return fmt.lower()
+        desc = getattr(obj, "description", "") or ""
+        if desc.startswith("convert_to: "):
+            fmt2 = desc.split(":", 1)[1].strip().lower()
+            if fmt2 == "excel":
+                fmt2 = "xlsx"
+            if fmt2 in {"csv", "xlsx", "json"}:
+                return fmt2
+    return infer_export_format_from_prompt(prompt, current)
 
 
 class LLMCallCounter:
@@ -275,6 +310,9 @@ class DataWisePipeline:
             if raise_on_error:
                 raise
             return self._error_output(sid, "Could not understand the instruction provided.")
+
+        # Honour "convert to json/csv/xlsx" in the prompt even if the UI dropdown differs
+        export_format = resolve_export_format(prompt, objectives, export_format)
 
         # ==============================================================
         # Stage 3 (initial) — Task planning
@@ -461,6 +499,19 @@ class DataWisePipeline:
 
         # Plain-English summary built from execution telemetry
         summary = synthesize_plain_english_summary(plan, all_step_results, validation)
+        convert_fmt = resolve_export_format(prompt, objectives, "")
+        if convert_fmt in {"csv", "xlsx", "json"} and (
+            not all_step_results or summary.startswith("No steps")
+        ):
+            summary = (
+                f"Converted tabular data to {convert_fmt.upper()} for download "
+                f"(file: {result_filename or f'result.{convert_fmt}'})."
+            )
+        elif convert_fmt in {"csv", "xlsx", "json"} and any(
+            (getattr(o, "description", "") or "").startswith("convert_to:")
+            for o in objectives
+        ):
+            summary = f"Exported as {convert_fmt.upper()}. " + summary
 
         # Determine overall status
         if last_error:
