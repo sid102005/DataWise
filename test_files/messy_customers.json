@@ -1,0 +1,112 @@
+[
+  {
+    "customer_id":"1001",
+    " name ":" Alice ",
+    "age":"34",
+    "signup_date":"2024-01-15",
+    "purchase":"9850.5",
+    "region":"North",
+    "notes":"ok",
+    "empty_col":"",
+    "source":"web"
+  },
+  {
+    "customer_id":"1002",
+    " name ":"Bob",
+    "age":"N\/A",
+    "signup_date":"15\/02\/2024",
+    "purchase":"9420",
+    "region":"South",
+    "notes":"null",
+    "empty_col":"NA",
+    "source":"web"
+  },
+  {
+    "customer_id":"1003",
+    " name ":"Charlie",
+    "age":"29",
+    "signup_date":"Jan 22, 2024",
+    "purchase":"",
+    "region":"East",
+    "notes":"-",
+    "empty_col":null,
+    "source":"web"
+  },
+  {
+    "customer_id":"1004",
+    " name ":"  Diana  ",
+    "age":"38",
+    "signup_date":"2024-02-01",
+    "purchase":"8650.0",
+    "region":"West",
+    "notes":"ok",
+    "empty_col":"n\/a",
+    "source":"web"
+  },
+  {
+    "customer_id":"1005",
+    " name ":"Eve",
+    "age":"null",
+    "signup_date":"2024\/03\/10",
+    "purchase":"7200",
+    "region":"North",
+    "notes":"?",
+    "empty_col":"",
+    "source":"web"
+  },
+  {
+    "customer_id":"1001",
+    " name ":" Alice ",
+    "age":"34",
+    "signup_date":"2024-01-15",
+    "purchase":"9850.5",
+    "region":"North",
+    "notes":"ok",
+    "empty_col":"",
+    "source":"web"
+  },
+  {
+    "customer_id":"1006",
+    " name ":"Frank",
+    "age":"41",
+    "signup_date":"03-04-2024",
+    "purchase":"6100.25",
+    "region":"South",
+    "notes":"ok",
+    "empty_col":null,
+    "source":"web"
+  },
+  {
+    "customer_id":"1007",
+    " name ":"Grace",
+    "age":"27",
+    "signup_date":"2024-05-01",
+    "purchase":"NA",
+    "region":"East",
+    "notes":"missing",
+    "empty_col":"",
+    "source":"web"
+  },
+  {
+    "customer_id":"1008",
+    " name ":"Hank",
+    "age":"50",
+    "signup_date":"2024-05-20",
+    "purchase":"5500",
+    "region":"West",
+    "notes":"ok",
+    "empty_col":"",
+    "source":"web"
+  },
+  {
+    "customer_id":"1002",
+    " name ":"Bob",
+    "age":"N\/A",
+    "signup_date":"15\/02\/2024",
+    "purchase":"9420",
+    "region":"South",
+    "notes":"null",
+    "empty_col":"NA",
+    "source":"web"
+  }
+]

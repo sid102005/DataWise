@@ -1,0 +1,11 @@
+customer_id, name ,age,signup_date,purchase,region,notes,empty_col,source
+1001, Alice ,34,2024-01-15,9850.5,North,ok,,web
+1002,Bob,N/A,15/02/2024,9420,South,null,NA,web
+1003,Charlie,29,"Jan 22, 2024",,East,-,,web
+1004,  Diana  ,38,2024-02-01,8650.0,West,ok,n/a,web
+1005,Eve,null,2024/03/10,7200,North,?,,web
+1001, Alice ,34,2024-01-15,9850.5,North,ok,,web
+1006,Frank,41,03-04-2024,6100.25,South,ok,,web
+1007,Grace,27,2024-05-01,NA,East,missing,,web
+1008,Hank,50,2024-05-20,5500,West,ok,,web
+1002,Bob,N/A,15/02/2024,9420,South,null,NA,web

@@ -1,5 +1,6 @@
 from pathlib import Path
 from typing import Any, Tuple, List, Dict
+import json
 import pymupdf as fitz
 from docx import Document as DocxDocument
 from docx.shared import Pt, RGBColor
@@ -7,9 +8,11 @@ from docx.enum.text import WD_ALIGN_PARAGRAPH
 import re
 import os
 import logging
+import csv
 
 from backend.processors.base import FileProcessor
-from backend.models.schemas import ValidationResult, Plan, Step
+from backend.models.schemas import ValidationResult, Plan, Step, ExecutionResult
+from backend.tools import document_ops as doc_ops
 
 log = logging.getLogger(__name__)
 
@@ -154,6 +157,122 @@ class DocumentProcessor(FileProcessor):
                 grid.append([cell.text.strip() for cell in row.cells])
             tables.append(grid)
         return tables
+
+    def _extract_tables_pdf(self, file_path: Path) -> List[List[List[str]]]:
+        tables: List[List[List[str]]] = []
+        doc = fitz.open(file_path)
+        try:
+            for page in doc:
+                finder = page.find_tables()
+                for tab in finder:
+                    tables.append(tab.extract())
+        finally:
+            doc.close()
+        return tables
+
+    def _extract_text_by_page_pdf(self, file_path: Path) -> List[dict]:
+        pages = []
+        doc = fitz.open(file_path)
+        try:
+            for i, page in enumerate(doc, start=1):
+                pages.append({"page": i, "text": page.get_text()})
+        finally:
+            doc.close()
+        return pages
+
+    def _ocr_pdf(self, file_path: Path) -> str:
+        """OCR PDF pages when a text layer is missing. Requires Tesseract + Pillow."""
+        try:
+            import pytesseract
+            from PIL import Image
+        except ImportError as exc:
+            raise ValueError(
+                "OCR requires pytesseract and Pillow. Install them and Tesseract OCR binary."
+            ) from exc
+
+        texts: list[str] = []
+        doc = fitz.open(file_path)
+        try:
+            for i, page in enumerate(doc, start=1):
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+                page_text = pytesseract.image_to_string(img)
+                texts.append(f"--- Page {i} ---\n{page_text.strip()}")
+        except Exception as exc:
+            raise ValueError(
+                f"OCR failed (is Tesseract installed and on PATH?): {exc}"
+            ) from exc
+        finally:
+            doc.close()
+        joined = "\n\n".join(t for t in texts if t.strip())
+        if not joined.strip():
+            raise ValueError("OCR produced no text.")
+        return joined
+
+    def _extract_images_pdf(self, file_path: Path, output_dir: Path | None) -> list[dict]:
+        images: list[dict] = []
+        doc = fitz.open(file_path)
+        try:
+            for page_index, page in enumerate(doc, start=1):
+                for img_index, img in enumerate(page.get_images(full=True), start=1):
+                    xref = img[0]
+                    try:
+                        pix = fitz.Pixmap(doc, xref)
+                        if pix.n > 4:
+                            pix = fitz.Pixmap(fitz.csRGB, pix)
+                        name = f"page{page_index}_image{img_index}.png"
+                        meta = {
+                            "page": page_index,
+                            "index": img_index,
+                            "width": pix.width,
+                            "height": pix.height,
+                            "filename": name,
+                        }
+                        if output_dir is not None:
+                            out = output_dir / name
+                            pix.save(str(out))
+                            meta["path"] = str(out)
+                        images.append(meta)
+                    except Exception as exc:
+                        log.warning("Skipping PDF image xref=%s: %s", xref, exc)
+        finally:
+            doc.close()
+        return images
+
+    def _write_tables_csv(self, tables: list, output_dir: Path | None) -> list[str]:
+        paths: list[str] = []
+        if not output_dir or not tables:
+            return paths
+        for i, table in enumerate(tables):
+            path = output_dir / f"table_{i + 1}.csv"
+            with path.open("w", encoding="utf-8", newline="") as fh:
+                writer = csv.writer(fh)
+                for row in table:
+                    writer.writerow([(c if c is not None else "") for c in row])
+            paths.append(str(path))
+        return paths
+
+    def _rich_metadata(self, file_path: Path) -> dict:
+        meta = self.profile(file_path)
+        meta["filename"] = file_path.name
+        meta["size_bytes"] = file_path.stat().st_size if file_path.exists() else 0
+        ext = file_path.suffix.lower()
+        if ext == ".pdf":
+            try:
+                doc = fitz.open(file_path)
+                pdf_meta = doc.metadata or {}
+                meta.update({
+                    "title": pdf_meta.get("title") or "",
+                    "author": pdf_meta.get("author") or "",
+                    "subject": pdf_meta.get("subject") or "",
+                    "creator": pdf_meta.get("creator") or "",
+                    "producer": pdf_meta.get("producer") or "",
+                    "page_count": len(doc),
+                })
+                doc.close()
+            except Exception:
+                pass
+        return meta
 
     def _call_llm_analysis(self, text: str, prompt: str) -> str:
         """Call the LLM to analyze extracted text against the user's prompt.

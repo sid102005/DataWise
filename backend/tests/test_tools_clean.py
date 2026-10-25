@@ -9,6 +9,11 @@ from backend.tools.clean import (
     handle_missing,
     fix_type_mismatches,
     standardize_dates,
+    clean_for_ml,
+    strip_whitespace,
+    normalize_missing,
+    drop_empty_columns,
+    drop_constant_columns,
 )
 from backend.core.exceptions import ToolInputError
 
@@ -153,3 +158,46 @@ def test_standardize_dates_column_validation_rejection(sample_df):
     with pytest.raises(ToolInputError) as exc_info:
         standardize_dates(sample_df, column="MissingDate")
     assert "does not exist in dataset" in str(exc_info.value)
+
+
+# ==================== clean_for_ml tests ====================
+
+def test_clean_for_ml_on_messy_fixture():
+    """clean_for_ml prepares the test_files messy CSV for ML use."""
+    messy_path = REPO_ROOT / "test_files" / "messy_customers.csv"
+    assert messy_path.exists(), "test_files/messy_customers.csv must exist"
+    messy = pd.read_csv(messy_path)
+    cleaned, report = clean_for_ml(messy)
+
+    assert len(cleaned) > 0
+    assert cleaned.isna().sum().sum() == 0
+    assert int(cleaned.duplicated().sum()) == 0
+    assert "empty_col" not in cleaned.columns
+    assert "source" not in cleaned.columns
+    assert report["duplicates_removed"] >= 1
+    assert "empty_col" in report["empty_columns_dropped"] or report["missing_tokens_converted"] >= 0
+    assert report["rows_out"] == len(cleaned)
+
+
+def test_strip_and_normalize_helpers():
+    df = pd.DataFrame({" name ": [" Alice ", "N/A", "Bob"], "x": [1, 2, 3]})
+    stripped = strip_whitespace(df)
+    assert list(stripped.columns) == ["name", "x"]
+    assert stripped.loc[0, "name"] == "Alice"
+    normalized, n = normalize_missing(stripped)
+    assert n >= 1
+    assert pd.isna(normalized.loc[1, "name"])
+
+
+def test_drop_empty_and_constant_helpers():
+    df = pd.DataFrame({
+        "a": [1, 2, 3],
+        "empty": [None, None, None],
+        "const": ["web", "web", "web"],
+    })
+    no_empty, dropped_empty = drop_empty_columns(df)
+    assert dropped_empty == ["empty"]
+    assert "empty" not in no_empty.columns
+    no_const, dropped_const = drop_constant_columns(no_empty)
+    assert "const" in dropped_const
+    assert list(no_const.columns) == ["a"]

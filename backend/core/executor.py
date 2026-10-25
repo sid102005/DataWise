@@ -41,6 +41,12 @@ _TOOL_REGISTRY: dict[str, Any] = {
     "handle_missing": _clean.handle_missing,
     "fix_type_mismatches": _clean.fix_type_mismatches,
     "standardize_dates": _clean.standardize_dates,
+    "strip_whitespace": _clean.strip_whitespace,
+    "normalize_missing": _clean.normalize_missing,
+    "drop_empty_columns": _clean.drop_empty_columns,
+    "drop_constant_columns": _clean.drop_constant_columns,
+    "auto_fix_types": _clean.auto_fix_types,
+    "clean_for_ml": _clean.clean_for_ml,
     # --- Transform ---
     "drop_column": _transform.drop_column,
     "add_column": _transform.add_column,
@@ -62,7 +68,16 @@ _TOOL_REGISTRY: dict[str, Any] = {
 _CHART_TOOLS = {"bar_chart", "line_chart", "pie_chart"}
 
 # Tools whose return value is (df, extra_telemetry).
-_TUPLE_RETURN_TOOLS = {"drop_duplicates", "handle_missing", "filter_rows"}
+_TUPLE_RETURN_TOOLS = {
+    "drop_duplicates",
+    "handle_missing",
+    "filter_rows",
+    "normalize_missing",
+    "drop_empty_columns",
+    "drop_constant_columns",
+    "auto_fix_types",
+    "clean_for_ml",
+}
 
 
 class ExecutorError(ExecutionError):
@@ -153,9 +168,62 @@ def _dispatch_step(
         return result_df, chart_paths, summary
 
     # ----------------------------------------------------------------
+    # clean_for_ml -> (df, report: dict)
+    # ----------------------------------------------------------------
+    if tool_name == "clean_for_ml":
+        result_df, report = func(df, **params)
+        parts = [
+            f"ML clean: {report.get('rows_in', '?')}→{report.get('rows_out', '?')} rows, "
+            f"{report.get('cols_in', '?')}→{report.get('cols_out', '?')} cols",
+        ]
+        if report.get("duplicates_removed"):
+            parts.append(f"removed {report['duplicates_removed']} duplicate row(s)")
+        if report.get("missing_tokens_converted"):
+            parts.append(f"normalized {report['missing_tokens_converted']} missing token(s)")
+        if report.get("empty_columns_dropped"):
+            parts.append(f"dropped empty cols {report['empty_columns_dropped']}")
+        if report.get("constant_columns_dropped"):
+            parts.append(f"dropped constant cols {report['constant_columns_dropped']}")
+        if report.get("nulls_imputed"):
+            parts.append(f"imputed nulls in {list(report['nulls_imputed'].keys())}")
+        if report.get("types_coerced"):
+            parts.append(f"coerced types {report['types_coerced']}")
+        if report.get("dates_standardized"):
+            parts.append(f"standardized dates {report['dates_standardized']}")
+        summary = "; ".join(parts) + "."
+        return result_df, chart_paths, summary
+
+    # ----------------------------------------------------------------
+    # Other (df, telemetry) clean helpers
+    # ----------------------------------------------------------------
+    if tool_name == "normalize_missing":
+        result_df, n_converted = func(df, **params)
+        summary = f"Normalized {n_converted} missing-value token(s) to null."
+        return result_df, chart_paths, summary
+
+    if tool_name in {"drop_empty_columns", "drop_constant_columns"}:
+        result_df, dropped = func(df, **params)
+        label = "empty" if tool_name == "drop_empty_columns" else "constant"
+        summary = (
+            f"Dropped {len(dropped)} {label} column(s): {dropped}."
+            if dropped
+            else f"No {label} columns to drop."
+        )
+        return result_df, chart_paths, summary
+
+    if tool_name == "auto_fix_types":
+        result_df, changed = func(df, **params)
+        summary = (
+            f"Auto-coerced column types: {changed}."
+            if changed
+            else "No column types needed coercion."
+        )
+        return result_df, chart_paths, summary
+
+    # ----------------------------------------------------------------
     # Remaining tools: fix_type_mismatches, standardize_dates,
     # rename_columns, add_derived_column, groupby_aggregate,
-    # sort_values, top_n — all return a plain DataFrame.
+    # sort_values, top_n, strip_whitespace — all return a plain DataFrame.
     # ----------------------------------------------------------------
     result_df = func(df, **params)
     return result_df, chart_paths, summary

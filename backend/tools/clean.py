@@ -1,13 +1,18 @@
 """DataWise Tool Layer: Cleaning Tools.
 
 Deterministic, pure functions for deduplication, missing-value imputation,
-type casting, and date format standardization.
+type casting, date format standardization, and ML-oriented tabular prep.
 """
 
 from typing import Any
 import pandas as pd
 
 from backend.core.exceptions import ToolInputError
+
+# Common spreadsheet / CSV placeholders that should become true missing values.
+_MISSING_TOKENS = frozenset({
+    "", "na", "n/a", "null", "none", "nan", "nil", "-", "--", "?", "#n/a", "#na", "missing",
+})
 
 
 def _validate_columns_exist(df: pd.DataFrame, columns: list[str] | str) -> list[str]:
@@ -204,3 +209,158 @@ def standardize_dates(
         raise ToolInputError(f"Failed to standardize dates in column '{column}': {str(e)}")
 
     return result_df
+
+
+def strip_whitespace(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip leading/trailing whitespace from column names and object/string cells."""
+    result = df.copy()
+    result.columns = [str(c).strip() if c is not None else c for c in result.columns]
+    for col in result.columns:
+        if pd.api.types.is_object_dtype(result[col]) or pd.api.types.is_string_dtype(result[col]):
+            result[col] = result[col].map(
+                lambda v: v.strip() if isinstance(v, str) else v
+            )
+    return result
+
+
+def normalize_missing(df: pd.DataFrame) -> tuple[pd.DataFrame, int]:
+    """Convert common missing-value tokens (N/A, null, blank, …) into NaN.
+
+    Returns:
+        Tuple of (transformed_df, number_of_cells_converted).
+    """
+    result = df.copy()
+    converted = 0
+    for col in result.columns:
+        if not (pd.api.types.is_object_dtype(result[col]) or pd.api.types.is_string_dtype(result[col])):
+            continue
+        series = result[col]
+        mask = series.map(
+            lambda v: isinstance(v, str) and v.strip().lower() in _MISSING_TOKENS
+        )
+        n = int(mask.sum())
+        if n:
+            result.loc[mask, col] = pd.NA
+            converted += n
+    return result, converted
+
+
+def drop_empty_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Drop columns that are entirely missing after normalization."""
+    empty = [c for c in df.columns if int(df[c].isna().sum()) == len(df)]
+    if not empty:
+        return df.copy(), []
+    return df.drop(columns=empty).copy(), empty
+
+
+def drop_constant_columns(df: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+    """Drop columns with ≤1 unique non-null value (no signal for ML)."""
+    constant: list[str] = []
+    for col in df.columns:
+        nunique = int(df[col].nunique(dropna=True))
+        if nunique <= 1:
+            constant.append(col)
+    if not constant:
+        return df.copy(), []
+    return df.drop(columns=constant).copy(), constant
+
+
+def auto_fix_types(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, str]]:
+    """Coerce object columns to numeric when a majority of non-null values parse as numbers.
+
+    Returns:
+        Tuple of (transformed_df, {column: target_type} for columns that changed).
+    """
+    result = df.copy()
+    changed: dict[str, str] = {}
+    for col in result.columns:
+        if not (pd.api.types.is_object_dtype(result[col]) or pd.api.types.is_string_dtype(result[col])):
+            continue
+        non_null = result[col].dropna()
+        if len(non_null) == 0:
+            continue
+        numeric = pd.to_numeric(non_null, errors="coerce")
+        if float(numeric.notna().mean()) >= 0.8:
+            result[col] = pd.to_numeric(result[col], errors="coerce")
+            changed[col] = "numeric"
+    return result, changed
+
+
+def clean_for_ml(df: pd.DataFrame) -> tuple[pd.DataFrame, dict[str, Any]]:
+    """Run a full ML-oriented cleaning pipeline on a tabular DataFrame.
+
+    Steps (deterministic, no LLM):
+      1. Strip whitespace from headers and text cells
+      2. Normalize missing tokens (N/A, null, blank, …) to NaN
+      3. Drop all-empty columns
+      4. Drop duplicate rows
+      5. Auto-coerce mostly-numeric text columns
+      6. Impute remaining nulls (median for numeric, mode otherwise)
+      7. Standardize date-like columns to ISO YYYY-MM-DD
+      8. Drop constant (zero-variance) columns
+
+    Returns:
+        Tuple of (cleaned_df, report_dict describing what changed).
+    """
+    if df is None:
+        raise ToolInputError("clean_for_ml requires a DataFrame.")
+
+    report: dict[str, Any] = {
+        "rows_in": int(len(df)),
+        "cols_in": int(len(df.columns)),
+        "whitespace_stripped": True,
+        "missing_tokens_converted": 0,
+        "empty_columns_dropped": [],
+        "duplicates_removed": 0,
+        "types_coerced": {},
+        "nulls_imputed": {},
+        "dates_standardized": [],
+        "constant_columns_dropped": [],
+    }
+
+    result = strip_whitespace(df)
+    result, n_missing = normalize_missing(result)
+    report["missing_tokens_converted"] = n_missing
+
+    result, empty_cols = drop_empty_columns(result)
+    report["empty_columns_dropped"] = empty_cols
+
+    result, n_dupes = drop_duplicates(result)
+    report["duplicates_removed"] = n_dupes
+
+    result, coerced = auto_fix_types(result)
+    report["types_coerced"] = coerced
+
+    # Standardize date-like columns before final imputation (parsing may create NaT)
+    date_cols: list[str] = []
+    for col in list(result.columns):
+        if pd.api.types.is_datetime64_any_dtype(result[col]):
+            result = standardize_dates(result, column=col)
+            date_cols.append(col)
+            continue
+        if not (pd.api.types.is_object_dtype(result[col]) or pd.api.types.is_string_dtype(result[col])):
+            continue
+        sample = result[col].dropna()
+        if len(sample) == 0:
+            continue
+        parsed = pd.to_datetime(sample, format="mixed", errors="coerce")
+        if float(parsed.notna().mean()) >= 0.8:
+            result = standardize_dates(result, column=col)
+            date_cols.append(col)
+    report["dates_standardized"] = date_cols
+
+    # Impute remaining nulls column-by-column (after type/date coercion)
+    null_cols = [c for c in result.columns if int(result[c].isna().sum()) > 0]
+    imputed: dict[str, int] = {}
+    for col in null_cols:
+        strategy = "median" if pd.api.types.is_numeric_dtype(result[col]) else "mode"
+        result, filled = handle_missing(result, columns=col, strategy=strategy)
+        imputed[col] = int(filled.get(col, 0))
+    report["nulls_imputed"] = imputed
+
+    result, constant_cols = drop_constant_columns(result)
+    report["constant_columns_dropped"] = constant_cols
+
+    report["rows_out"] = int(len(result))
+    report["cols_out"] = int(len(result.columns))
+    return result.reset_index(drop=True), report

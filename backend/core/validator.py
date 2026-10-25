@@ -52,7 +52,13 @@ _CHECK_TYPE_CONVERTED = "TYPE_CONVERTED"
 _MAX_ROW_EXPANSION_FACTOR = 10
 
 # Tool names that are considered "cleaning" operations for null-check purposes.
-_CLEANING_TOOLS = {"drop_duplicates", "handle_missing", "fix_type_mismatches"}
+_CLEANING_TOOLS = {
+    "drop_duplicates",
+    "handle_missing",
+    "fix_type_mismatches",
+    "clean_for_ml",
+    "normalize_missing",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -470,6 +476,24 @@ def _run_operation_specific_checks(
                 f"Step {sn} select_columns: columns match {wanted}."
                 if ok
                 else f"Step {sn} select_columns: expected {wanted}, got {actual}."
+            )
+            details[check_key] = msg
+            (passed if ok else failed).append(check_key)
+
+        elif tn == "clean_for_ml":
+            check_key = "ML_CLEAN_READY"
+            null_total = int(result_df.isna().sum().sum()) if len(result_df.columns) else 0
+            dup_total = int(result_df.duplicated().sum()) if len(result_df) else 0
+            ok = null_total == 0 and dup_total == 0 and len(result_df) > 0
+            msg = (
+                f"Step {sn} clean_for_ml: ML-ready "
+                f"({len(result_df)} rows, {len(result_df.columns)} cols, "
+                f"{null_total} nulls, {dup_total} duplicate rows)."
+                if ok
+                else (
+                    f"Step {sn} clean_for_ml: not ML-ready "
+                    f"({null_total} nulls, {dup_total} duplicates remain)."
+                )
             )
             details[check_key] = msg
             (passed if ok else failed).append(check_key)

@@ -61,7 +61,12 @@ def _id_columns(profile: DataProfile) -> list[str]:
 
 
 def _steps_for_clean(profile: DataProfile, step_offset: int) -> list[Step]:
-    """Generate cleaning steps grounded in the actual DataProfile."""
+    """Generate cleaning steps grounded in the actual DataProfile.
+
+    For tabular formats (CSV / XLSX / JSON), emit a single ``clean_for_ml`` step
+    that prepares the dataset for machine-learning use (nulls, duplicates,
+    whitespace, empty/constant columns, type coercion, dates).
+    """
     steps: list[Step] = []
     n = step_offset
 
@@ -90,48 +95,22 @@ def _steps_for_clean(profile: DataProfile, step_offset: int) -> list[Step]:
     if profile.file_format in {"wav", "mp3"}:
         return _steps_for_audio([], profile, step_offset)
 
-    # Deduplication — only if duplicates actually exist
-    id_cols = _id_columns(profile)
-    if profile.duplicate_row_count > 0:
-        params: dict[str, Any] = {}
-        if id_cols:
-            params["subset"] = id_cols[0] if len(id_cols) == 1 else id_cols
-        n += 1
-        steps.append(Step(
-            step_number=n,
-            tool_name="drop_duplicates",
-            description=f"Remove {profile.duplicate_row_count} duplicate row(s).",
-            parameters=params,
-            expected_output="Duplicate rows removed; row count reduced.",
-        ))
-
-    # Handle missing values — only for columns that actually have nulls
-    null_cols = _columns_with_nulls(profile)
-    if null_cols:
-        for col in null_cols:
-            col_info = next(c for c in profile.columns if c.name == col)
-            strategy = "median" if col_info.inferred_type == InferredType.NUMERIC else "mode"
-            n += 1
-            steps.append(Step(
-                step_number=n,
-                tool_name="handle_missing",
-                description=f"Fill {col_info.null_count} missing value(s) in '{col}' using {strategy}.",
-                parameters={"columns": col, "strategy": strategy},
-                expected_output=f"No nulls remain in '{col}'.",
-            ))
-
-    # Standardize dates — only if date columns exist
-    date_cols = _date_columns(profile)
-    for col in date_cols:
-        n += 1
-        steps.append(Step(
-            step_number=n,
-            tool_name="standardize_dates",
-            description=f"Standardize date format in '{col}' to ISO YYYY-MM-DD.",
-            parameters={"column": col, "target_format": "%Y-%m-%d"},
-            expected_output=f"'{col}' contains uniformly formatted dates.",
-        ))
-
+    # Tabular (csv / xlsx / json) — full ML-oriented clean pipeline
+    n += 1
+    steps.append(Step(
+        step_number=n,
+        tool_name="clean_for_ml",
+        description=(
+            "Clean tabular data for ML: strip whitespace, normalize missing tokens, "
+            "drop empty/constant columns, remove duplicates, coerce types, "
+            "impute nulls, and standardize dates."
+        ),
+        parameters={},
+        expected_output=(
+            "Dataset has no duplicate rows, no nulls, no empty/constant columns, "
+            "and is ready for machine-learning use."
+        ),
+    ))
     return steps
 
 
@@ -953,6 +932,8 @@ def _build_heuristic_plan(
 _ALLOWED_TOOL_NAMES = frozenset({
     # Tabular
     "drop_duplicates", "handle_missing", "fix_type_mismatches", "standardize_dates",
+    "strip_whitespace", "normalize_missing", "drop_empty_columns", "drop_constant_columns",
+    "auto_fix_types", "clean_for_ml",
     "drop_column", "add_column", "select_columns", "rename_columns", "filter_rows", "add_derived_column",
     "groupby_aggregate", "sort_values", "top_n",
     "bar_chart", "line_chart", "pie_chart",

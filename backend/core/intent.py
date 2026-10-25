@@ -42,7 +42,11 @@ log = logging.getLogger(__name__)
 # Keyword → ObjectiveCategory mapping for deterministic fallback
 # ---------------------------------------------------------------------------
 _KEYWORD_MAP: list[tuple[re.Pattern[str], ObjectiveCategory]] = [
-    (re.compile(r"\b(clean|dedupe|duplicate|duplicates|missing|null|nulls|impute|fix|standardiz\w*)\b", re.I), ObjectiveCategory.CLEAN),
+    (re.compile(
+        r"\b(clean|dedupe|duplicate|duplicates|missing|null|nulls|impute|fix|standardiz\w*|"
+        r"ml[\s-]?ready|machine[\s-]?learning|prepare\s+for\s+ml|data[\s-]?prep|preprocess)\b",
+        re.I,
+    ), ObjectiveCategory.CLEAN),
     (re.compile(r"\b(group|grouping|aggregat\w*|sum|average|avg|count|min|max|total)\b", re.I), ObjectiveCategory.AGGREGATE),
     (re.compile(r"\b(sort|rank|top[\s-]?\d+|bottom[\s-]?\d+|highest|lowest|largest|smallest)\b", re.I), ObjectiveCategory.AGGREGATE),
     (re.compile(r"\b(chart|plot|graph|visuali[sz]\w*|bar|line|pie)\b", re.I), ObjectiveCategory.VISUALIZE),
