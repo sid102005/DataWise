@@ -840,8 +840,10 @@ def _steps_for_document(
             expected_output=expected or description,
         ))
 
-    # OCR for scanned PDFs
-    if any(k in full_text for k in ["ocr", "scanned", "scan this"]):
+    # OCR for scanned PDFs (explicit prompt OR profile says no text layer)
+    wants_ocr = any(k in full_text for k in ["ocr", "scanned", "scan this", "scan pdf"])
+    no_text_layer = getattr(profile, "has_text_layer", None) is False
+    if wants_ocr or (no_text_layer and profile.file_format == "pdf"):
         add("extract_text_ocr", "OCR scanned PDF pages into text.")
 
     # Core text extract if any text/summary/qa/entity style request, or default later
@@ -853,7 +855,7 @@ def _steps_for_document(
         "convert", "word count", "count word",
     ])
 
-    if wants_text and not any(k in full_text for k in ["ocr", "scanned", "scan this"]):
+    if wants_text and not any(s.tool_name == "extract_text_ocr" for s in steps):
         add("extract_text", "Extract text from document.")
 
     if any(k in full_text for k in ["clean text", "normalize", "clean this document", "clean the document", "clean document"]):

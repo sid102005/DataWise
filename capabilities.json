@@ -29,7 +29,7 @@
       ],
       "formats": ["pdf", "docx", "txt", "md"],
       "limitations": {
-        "ocr": "Optional — requires Tesseract binary + pytesseract",
+        "ocr": "Supported when Tesseract binary + pytesseract are installed; auto-used for scanned PDFs with no text layer",
         "llm_qa": "Optional — requires ANTHROPIC_API_KEY or GEMINI_API_KEY; falls back to raw text",
         "legacy_doc": "Detected but rejected (binary/macros not supported)",
         "pptx": "Presentation processor planned separately"
@@ -44,10 +44,11 @@
         "rotate",
         "convert_format",
         "compress",
-        "extract_metadata"
+        "extract_metadata",
+        "extract_text_ocr"
       ],
       "limitations": {
-        "ocr": "Not supported - Tesseract binary missing",
+        "ocr": "Supported when Tesseract binary + pytesseract are installed",
         "description_classification": "Deferred to future phase - requires vision LLM API key",
         "background_removal": "Not supported",
         "batch_processing": "Supported across all file categories in Phase 13"

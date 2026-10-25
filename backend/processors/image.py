@@ -117,6 +117,7 @@ class ImageProcessor(FileProcessor):
         target_format = file_path.suffix.lower().lstrip(".")
         quality: Optional[int] = None
         metadata: Dict[str, Any] = {}
+        extracted_text = ""
 
         for step in structured_operation.steps:
             tool = step.tool_name
@@ -152,24 +153,15 @@ class ImageProcessor(FileProcessor):
                 metadata = self.profile(file_path)
 
             elif tool == "extract_text_ocr":
-                import shutil
-                tesseract_cmd = shutil.which("tesseract") or (
-                    r"C:\Program Files\Tesseract-OCR\tesseract.exe"
-                    if Path(r"C:\Program Files\Tesseract-OCR\tesseract.exe").exists()
-                    else None
-                )
-                if tesseract_cmd:
-                    try:
-                        import pytesseract
-                        pytesseract.pytesseract.tesseract_cmd = tesseract_cmd
-                        extracted = pytesseract.image_to_string(current_img)
-                        if metadata is None:
-                            metadata = {}
-                        metadata["extracted_text"] = extracted
-                    except Exception as err:
-                        raise ValueError(f"OCR execution failed: {err}")
-                else:
-                    raise ValueError("OCR is not supported on this system (Tesseract missing).")
+                try:
+                    from backend.core.ocr_locator import ocr_pil_image
+
+                    extracted_text = ocr_pil_image(current_img)
+                    metadata["extracted_text"] = extracted_text
+                except RuntimeError as err:
+                    raise ValueError(str(err)) from err
+                except Exception as err:
+                    raise ValueError(f"OCR execution failed: {err}") from err
 
             else:
                 raise FileValidationError(f"Unsupported image tool: {tool}")
@@ -183,7 +175,11 @@ class ImageProcessor(FileProcessor):
                     rows_after=0,
                     columns_before=0,
                     columns_after=0,
-                    summary=step.expected_output,
+                    summary=(
+                        f"OCR extracted {len(extracted_text.split())} words."
+                        if tool == "extract_text_ocr"
+                        else step.expected_output
+                    ),
                     execution_time_ms=0.0,
                 )
             )
@@ -196,6 +192,7 @@ class ImageProcessor(FileProcessor):
             "mode": current_img.mode,
             "metadata": metadata,
             "source_file": file_path,
+            "text": extracted_text,
         }
         if quality is not None:
             results["quality"] = quality

@@ -13,6 +13,7 @@ import csv
 from backend.processors.base import FileProcessor
 from backend.models.schemas import ValidationResult, Plan, Step, ExecutionResult
 from backend.tools import document_ops as doc_ops
+from backend.core.ocr_locator import configure_pytesseract, is_tesseract_available, ocr_pil_image
 
 log = logging.getLogger(__name__)
 
@@ -90,8 +91,11 @@ class DocumentProcessor(FileProcessor):
         for page in doc:
             text += page.get_text() + "\n"
         doc.close()
-        
+        # Return empty when there is no text layer — callers may OCR-fallback.
+        # Keep the old placeholder only as a last-resort marker when OCR is unavailable.
         if not text.strip():
+            if is_tesseract_available():
+                return ""
             return "No extractable text, OCR unavailable"
         return text
 
@@ -181,14 +185,16 @@ class DocumentProcessor(FileProcessor):
         return pages
 
     def _ocr_pdf(self, file_path: Path) -> str:
-        """OCR PDF pages when a text layer is missing. Requires Tesseract + Pillow."""
+        """OCR PDF pages (scanned / image-only). Requires Tesseract + Pillow + pytesseract."""
         try:
-            import pytesseract
             from PIL import Image
         except ImportError as exc:
-            raise ValueError(
-                "OCR requires pytesseract and Pillow. Install them and Tesseract OCR binary."
-            ) from exc
+            raise ValueError("OCR requires Pillow. Install with: pip install pillow") from exc
+
+        try:
+            configure_pytesseract()
+        except RuntimeError as exc:
+            raise ValueError(str(exc)) from exc
 
         texts: list[str] = []
         doc = fitz.open(file_path)
@@ -196,8 +202,10 @@ class DocumentProcessor(FileProcessor):
             for i, page in enumerate(doc, start=1):
                 pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
                 img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-                page_text = pytesseract.image_to_string(img)
-                texts.append(f"--- Page {i} ---\n{page_text.strip()}")
+                page_text = ocr_pil_image(img)
+                texts.append(f"--- Page {i} ---\n{page_text}")
+        except ValueError:
+            raise
         except Exception as exc:
             raise ValueError(
                 f"OCR failed (is Tesseract installed and on PATH?): {exc}"
@@ -416,13 +424,43 @@ class DocumentProcessor(FileProcessor):
 
             try:
                 if tool == "extract_text":
-                    results["text"] = working_text
-                    summary = f"Extracted {len(working_text.split())} words of text."
+                    # Auto-fallback: scanned PDFs with no text layer → OCR when available
+                    no_text = (
+                        not working_text.strip()
+                        or working_text.strip() == "No extractable text, OCR unavailable"
+                    )
+                    if ext == ".pdf" and no_text:
+                        if is_tesseract_available():
+                            working_text = self._ocr_pdf(file_path)
+                            results["text"] = working_text
+                            summary = (
+                                f"No text layer found — OCR extracted "
+                                f"{len(working_text.split())} words."
+                            )
+                        else:
+                            results["text"] = "No extractable text, OCR unavailable"
+                            summary = (
+                                "No text layer and OCR unavailable "
+                                "(install Tesseract — see USAGE_GUIDE §5)."
+                            )
+                    else:
+                        results["text"] = working_text
+                        summary = f"Extracted {len(working_text.split())} words of text."
 
                 elif tool == "extract_text_ocr":
-                    if ext != ".pdf":
-                        raise ValueError("OCR is only supported for PDF files.")
-                    working_text = self._ocr_pdf(file_path)
+                    if ext == ".pdf":
+                        working_text = self._ocr_pdf(file_path)
+                    elif ext in {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".webp"}:
+                        from PIL import Image
+
+                        with Image.open(file_path) as img:
+                            working_text = ocr_pil_image(img.convert("RGB"))
+                    else:
+                        # DOCX/TXT/MD: OCR not applicable — fall back to normal extract
+                        if not working_text.strip():
+                            raise ValueError(
+                                f"OCR is for scanned PDFs/images; {ext} has no raster pages to OCR."
+                            )
                     results["text"] = working_text
                     summary = f"OCR extracted {len(working_text.split())} words."
 
@@ -584,15 +622,27 @@ class DocumentProcessor(FileProcessor):
         for step in structured_operation.steps:
             tool = step.tool_name
             
-            if tool == "extract_text":
-                text = after_state.get("text", "")
+            if tool in {"extract_text", "extract_text_ocr"}:
+                text = (after_state.get("text") or "").strip()
+                placeholder = "No extractable text, OCR unavailable"
                 profile = self.profile(before_state)
-                has_text = profile.get("has_text_layer", False)
-                
-                if text == "No extractable text, OCR unavailable" or not has_text:
-                    errors.append(f"extract_text failed: source {ext} has no extractable text layer and OCR is unavailable.")
-                elif not text or len(text.strip()) == 0:
-                    errors.append(f"extract_text returned empty string but source {ext} has a text layer.")
+                has_text_layer = bool(profile.get("has_text_layer", False))
+                ocr_ok = is_tesseract_available()
+
+                if text and text != placeholder:
+                    # Native text layer and/or OCR produced usable content
+                    checks_passed.append("extracted_text_non_empty: true")
+                    if not has_text_layer and tool in {"extract_text", "extract_text_ocr"}:
+                        checks_passed.append("ocr_fallback_or_scan: true")
+                elif not has_text_layer and not ocr_ok:
+                    errors.append(
+                        f"extract_text failed: source {ext} has no extractable text layer "
+                        f"and OCR is unavailable (install Tesseract + pytesseract)."
+                    )
+                elif not text or text == placeholder:
+                    errors.append(
+                        f"{tool} returned no usable text for source {ext}."
+                    )
                 else:
                     checks_passed.append("extracted_text_non_empty: true")
                     

@@ -90,32 +90,34 @@ def test_profile_scanned_pdf(doc_proc):
     profile = doc_proc.profile(file_path)
     assert profile["has_text_layer"] == False
 
-def test_ocr_not_supported(doc_proc):
-    """OCR fails softly when Tesseract/pytesseract is unavailable (recorded on the step)."""
+def test_ocr_scanned_pdf(doc_proc):
+    """OCR scanned PDF when Tesseract is available; otherwise soft-fail with a clear message."""
+    from backend.core.ocr_locator import is_tesseract_available
+
     file_path = FIXTURES_DIR / "sample_scanned.pdf"
     plan = create_plan("extract_text_ocr")
     result = doc_proc.execute(file_path, plan)
     assert result["step_results"], "expected at least one step result"
     step = result["step_results"][0]
-    # Either OCR succeeded (Tesseract present) or failed with a clear message
-    if not step.success:
-        assert "OCR" in step.summary or "ocr" in step.summary.lower()
-        assert result.get("errors")
-    else:
+    if is_tesseract_available():
+        assert step.success, step.summary
         assert result.get("text")
+        assert "No extractable text" not in (result.get("text") or "")
+    else:
+        assert not step.success
+        assert "OCR" in step.summary or "ocr" in step.summary.lower() or "Tesseract" in step.summary
+        assert result.get("errors")
 
 def test_validation_failure_scanned_pdf_extract_text(doc_proc):
-    # This proves validation catches a failure. 
-    # If the file has a text layer, extract_text MUST return text.
-    # We will pass a bad after_state pretending extract_text failed on sample.pdf 
+    # If the file has a text layer, extract_text MUST return usable text.
     file_path = FIXTURES_DIR / "sample.pdf"
     plan = create_plan("extract_text")
-    # Pretend it returned empty text
     bad_result = {"text": ""}
-    
+
     validation = doc_proc.validate_output(file_path, bad_result, plan)
-    assert validation.is_valid == False
-    assert "returned empty string but source .pdf has a text layer" in validation.checks_failed[0]
+    assert validation.is_valid is False
+    assert validation.checks_failed
+    assert "no usable text" in validation.checks_failed[0].lower() or "empty" in validation.checks_failed[0].lower() or "failed" in validation.checks_failed[0].lower()
 
 def test_end_to_end_export(doc_proc, tmp_path):
     file_path = FIXTURES_DIR / "sample.pdf"

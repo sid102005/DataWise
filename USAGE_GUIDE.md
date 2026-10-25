@@ -156,7 +156,7 @@ Generate (or refresh) fixtures:
 | Redact PII | `redact emails and phone numbers` | Masks PII in text |
 | Summary | `summarize this document` | Extractive (no LLM required) |
 | Q&A | `what is the invoice number?` | Uses LLM if API key set; else returns extracted text fallback |
-| OCR (scanned PDF) | `OCR this scanned PDF` | Needs **Tesseract** + `pytesseract` |
+| OCR (scanned PDF / image) | `OCR this scanned PDF` / `extract text with OCR` | Needs Tesseract — see **§5 OCR setup** |
 | Convert / export | `convert this document to markdown` | Download as txt/md/json/docx/pdf |
 
 ### How to test each document feature (checklist)
@@ -174,15 +174,171 @@ Generate (or refresh) fixtures:
    - `extract document metadata`
    - `summarize this document`
 6. Upload `sample_report.txt` → `redact emails and phone numbers`.  
-7. Upload `sample_overview.md` → `extract headings`.
-
-### OCR note
-
-OCR is optional. If Tesseract is not installed, the OCR step fails with a clear message. Text-layer PDFs work without OCR.
+7. Upload `sample_overview.md` → `extract headings`.  
+8. After OCR is installed (§5): upload a scanned PDF / image → `OCR this scanned PDF` or `extract text with OCR`.
 
 ---
 
-## 5. Images
+## 5. OCR setup (Tesseract) — share these steps with friends
+
+OCR lets DataWise read **scanned PDFs** (image-only pages) and **extract text from images**.  
+Normal text-layer PDFs / DOCX / TXT work **without** OCR. Install this only if you need scanned-doc or image text extraction.
+
+### What gets installed
+
+| Piece | Role |
+| :--- | :--- |
+| **Tesseract OCR** (system app) | The actual engine that reads text from images |
+| **pytesseract** (Python package) | Bridge between DataWise and Tesseract |
+
+DataWise looks for Tesseract in this order: `TESSERACT_BINARY` in `.env` → PATH → common Windows paths like `C:\Program Files\Tesseract-OCR\tesseract.exe`.
+
+---
+
+### Step A — Install the Tesseract system binary
+
+#### Windows (recommended)
+
+Open **PowerShell** and run:
+
+```powershell
+winget install --id UB-Mannheim.TesseractOCR -e --source winget --accept-package-agreements --accept-source-agreements
+```
+
+Then **close and reopen** the terminal (so PATH refreshes), and verify:
+
+```powershell
+tesseract --version
+```
+
+You should see a version line (e.g. `tesseract 5.x.x`).
+
+If `tesseract` is not found but it installed under Program Files, either:
+
+1. Add `C:\Program Files\Tesseract-OCR` to your user PATH, **or**
+2. Put this in your project `.env` (copy from `.env.example` if needed):
+
+```env
+TESSERACT_BINARY=C:\Program Files\Tesseract-OCR\tesseract.exe
+```
+
+#### Linux (Ubuntu / Debian)
+
+```bash
+sudo apt update
+sudo apt install -y tesseract-ocr
+tesseract --version
+```
+
+#### macOS
+
+```bash
+brew install tesseract
+tesseract --version
+```
+
+---
+
+### Step B — Install the Python package (inside the DataWise venv)
+
+From the repo root (`DataWise/`):
+
+**Windows**
+
+```powershell
+.venv\Scripts\Activate.ps1
+pip install pytesseract
+# Or install everything again:
+pip install -r requirements.txt
+```
+
+**Linux / macOS**
+
+```bash
+source .venv/bin/activate
+pip install pytesseract
+# Or:
+pip install -r requirements.txt
+```
+
+`pytesseract` is already listed in `requirements.txt`, so a normal `pip install -r requirements.txt` is enough if the venv is fresh.
+
+---
+
+### Step C — Verify DataWise can see Tesseract
+
+With the venv active, from the repo root:
+
+```powershell
+python -c "from backend.core.ocr_locator import get_tesseract_path, is_tesseract_available; print('available:', is_tesseract_available()); print('path:', get_tesseract_path())"
+```
+
+Expected:
+
+```text
+available: True
+path: C:\Program Files\Tesseract-OCR\tesseract.exe
+```
+
+(Path may differ on Linux/macOS.)
+
+If `available: False`, set `TESSERACT_BINARY` in `.env` to the full path of `tesseract` / `tesseract.exe`, save, and run the check again.
+
+---
+
+### Step D — Restart DataWise
+
+Stop the backend and UI, then start again (so they pick up env / PATH):
+
+```powershell
+.\start.ps1
+```
+
+Or use **Run and Debug → DataWise: Full Stack** (F5).
+
+---
+
+### Step E — Test OCR in the UI
+
+1. Open http://localhost:8501  
+2. Try one of these:
+
+| File to upload | Prompt |
+| :--- | :--- |
+| Scanned / image-only PDF | `OCR this scanned PDF` |
+| Scanned PDF | `extract text` (auto-OCR if there is no text layer) |
+| JPG / PNG image | `extract text with OCR` |
+
+3. Confirm the result text appears (and download works).
+
+Fixture tip: `tests/fixtures/documents/sample_scanned.pdf` is an image-only PDF made for OCR testing.
+
+---
+
+### OCR prompts (cheat sheet)
+
+| Prompt | Works on |
+| :--- | :--- |
+| `OCR this scanned PDF` | PDF |
+| `extract text with OCR` | PDF or image |
+| `extract text` | PDF — uses OCR automatically if no text layer |
+
+---
+
+### OCR troubleshooting
+
+| Problem | Fix |
+| :--- | :--- |
+| `tesseract: command not found` | Reopen terminal after install; or set `TESSERACT_BINARY` in `.env` |
+| `available: False` in Step C | Point `.env` at the real `tesseract.exe` path; restart backend |
+| `ModuleNotFoundError: pytesseract` | Activate `.venv` and run `pip install pytesseract` |
+| OCR returns empty / garbage text | Scan quality is low; try a clearer image (Tesseract limitation) |
+| Text PDFs work, scanned ones fail | OCR binary missing — finish Steps A–D |
+| Friend on another PC | They must run Steps A–E on **their** machine (Tesseract is not bundled in the repo) |
+
+---
+
+## 6. Images
 
 Supported ops (see also `EXAMPLE_COMMANDS.md`):
 
@@ -194,12 +350,13 @@ Supported ops (see also `EXAMPLE_COMMANDS.md`):
 | `convert image to PNG` | Format convert |
 | `compress this image with quality 50` | Compress |
 | `extract image metadata and dimensions` | Metadata |
+| `extract text with OCR` | Read text from the image (needs §5) |
 
 Fixtures: `tests/fixtures/images/` (generate via `scripts/generate_image_fixtures.py` if needed).
 
 ---
 
-## 6. Audio
+## 7. Audio
 
 | Prompt example | Result |
 | :--- | :--- |
@@ -212,7 +369,7 @@ Requires **FFmpeg** on PATH (`ffmpeg -version`).
 
 ---
 
-## 7. Video
+## 8. Video
 
 | Prompt example | Result |
 | :--- | :--- |
@@ -226,7 +383,7 @@ Requires **FFmpeg**.
 
 ---
 
-## 8. Archives (ZIP / TAR / GZ)
+## 9. Archives (ZIP / TAR / GZ)
 
 | Prompt example | Result |
 | :--- | :--- |
@@ -237,7 +394,7 @@ Security: path traversal / zip-bomb guards are built in.
 
 ---
 
-## 9. Automated tests (developers)
+## 10. Automated tests (developers)
 
 ```powershell
 .venv\Scripts\Activate.ps1
@@ -252,21 +409,28 @@ Security: path traversal / zip-bomb guards are built in.
 .venv\Scripts\pytest.exe backend/tests/test_regression_emergency_fix.py -q
 ```
 
+OCR-specific smoke (needs Tesseract — see §5):
+
+```powershell
+.venv\Scripts\pytest.exe backend/tests/test_document_processor.py::test_ocr_scanned_pdf backend/tests/test_image_processor.py::test_extract_text_ocr_gating -q --tb=short
+```
+
 ---
 
-## 10. Feature map (quick reference)
+## 11. Feature map (quick reference)
 
 | Area | Main capability | Test folder |
 | :--- | :--- | :--- |
 | Tabular ML clean | `clean_for_ml` | `test_files/tabular/` |
 | Documents | extract / tables / entities / redact / summary / … | `test_files/documents/` |
-| Images | resize, crop, rotate, convert, compress | `tests/fixtures/images/` |
+| OCR | scanned PDF + image text | §5 + `tests/fixtures/documents/sample_scanned.pdf` |
+| Images | resize, crop, rotate, convert, compress, OCR | `tests/fixtures/images/` |
 | Audio / video | metadata, trim, convert (FFmpeg) | `tests/fixtures/audio/`, `tests/fixtures/video/` |
 | Archives | list / safe extract | `tests/fixtures/archives/` |
 
 ---
 
-## 11. Related docs
+## 12. Related docs
 
 | Doc | Purpose |
 | :--- | :--- |
@@ -276,17 +440,18 @@ Security: path traversal / zip-bomb guards are built in.
 | [`capabilities.json`](capabilities.json) | Enabled processors / limits |
 | [`test_files/README.md`](test_files/README.md) | Index of tabular + document fixtures |
 | [`test_files/documents/README.md`](test_files/documents/README.md) | Document fixtures |
+| [`MANUAL_ACTIONS_LOG.md`](MANUAL_ACTIONS_LOG.md) | External binaries (Tesseract, etc.) |
 
 ---
 
-## 12. Troubleshooting
+## 13. Troubleshooting
 
 | Problem | Fix |
 | :--- | :--- |
 | UI cannot reach API | Start uvicorn on port 8000; check `DATAWISE_API_URL` in `.env` |
 | Weird session errors | Restart API with `--workers 1` |
 | Audio/video fails | Install FFmpeg; reopen terminal |
-| Document OCR fails | Install Tesseract + `pip install pytesseract` |
+| Document / image OCR fails | Follow **§5 OCR setup** (Tesseract + `pytesseract`, optional `TESSERACT_BINARY`, restart app) |
 | Clean prompt does nothing unexpected | Use clearer prompts from this guide |
 | Huge upload rejected | Confirm `.streamlit/config.toml` has `maxUploadSize = 10000` |
 

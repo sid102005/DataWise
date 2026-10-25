@@ -1,9 +1,35 @@
 """DataWise Global Configuration and Path Utilities."""
 
+from __future__ import annotations
+
+import os
 from pathlib import Path
 
 # Base repository directory
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+
+def load_env_file(env_path: Path | None = None) -> None:
+    """Load simple KEY=VALUE pairs from `.env` into os.environ (no overwrite)."""
+    path = env_path or (REPO_ROOT / ".env")
+    if not path.is_file():
+        return
+    try:
+        for raw in path.read_text(encoding="utf-8").splitlines():
+            line = raw.strip()
+            if not line or line.startswith("#") or "=" not in line:
+                continue
+            key, _, value = line.partition("=")
+            key = key.strip()
+            value = value.strip().strip('"').strip("'")
+            if key and key not in os.environ:
+                os.environ[key] = value
+    except OSError:
+        pass
+
+
+# Load project .env early so FFMPEG_BINARY / TESSERACT_BINARY / API keys are visible
+load_env_file()
 
 # Workspace directories for session-isolated file storage
 WORKSPACE_DIR = REPO_ROOT / "workspace"

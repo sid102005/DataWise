@@ -228,12 +228,19 @@ def test_extract_metadata(image_proc):
 
 
 def test_extract_text_ocr_gating(image_proc):
-    """Verify OCR raises an explicit unsupported error when Tesseract binary is not installed."""
+    """OCR works when Tesseract is installed; otherwise raises a clear missing-binary error."""
+    from backend.core.ocr_locator import is_tesseract_available
+
     file_path = FIXTURES_DIR / "sample.jpg"
     plan = create_plan("extract_text_ocr")
-    with pytest.raises(ValueError) as exc:
-        image_proc.execute(file_path, plan)
-    assert "OCR is not supported" in str(exc.value)
+    if is_tesseract_available():
+        result = image_proc.execute(file_path, plan)
+        assert "extracted_text" in result.get("metadata", {}) or "text" in result
+    else:
+        with pytest.raises(ValueError) as exc:
+            image_proc.execute(file_path, plan)
+        msg = str(exc.value).lower()
+        assert "tesseract" in msg or "ocr" in msg
 
 
 def test_validation_failure_deliberately_wrong(image_proc):

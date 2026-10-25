@@ -24,14 +24,15 @@ If a capability requires something only the user can provide:
 
 ### Action Required: Install Tesseract System Binary
 - **Date:** 2026-09-26
-- **Context:** Phase 10 Document Processor (extract_text_ocr)
-- **Problem:** OCR capability requires the Tesseract system binary, which is not installed in the environment. Python package pytesseract requires this external system library.
+- **Context:** Phase 10 Document Processor (extract_text_ocr) + Image OCR
+- **Problem:** OCR capability requires the Tesseract system binary. Python package `pytesseract` is now in `requirements.txt`; the binary must still be installed on the host.
 - **Action:**
-  1. Install Tesseract OCR for Windows (e.g., via scoop, winget, or official installer).
-  2. Ensure 	esseract is in the system PATH.
-  3. Install the pytesseract python wheel (pip install pytesseract).
-  4. Re-enable OCR in capabilities.json.
-- **Status:** PENDING
+  1. Install Tesseract OCR for Windows: `winget install --id UB-Mannheim.TesseractOCR -e`
+  2. Ensure `tesseract.exe` is on PATH, **or** set `TESSERACT_BINARY` in `.env` to the full path (DataWise also probes `C:\Program Files\Tesseract-OCR\tesseract.exe`).
+  3. `pip install pytesseract` (already listed in `requirements.txt`).
+  4. Restart the backend, then try: `OCR this scanned PDF` or `extract text with OCR` on an image.
+- **Code status:** Implemented (`backend/core/ocr_locator.py`, document + image processors). Auto-OCR runs for PDFs with no text layer when Tesseract is available.
+- **Host status:** PENDING until Tesseract is installed on this machine.
 
 ---
 
