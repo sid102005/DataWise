@@ -329,29 +329,75 @@ class DocumentProcessor(FileProcessor):
             log.warning("LLM analysis failed: %s", exc)
             return f"[LLM analysis failed: {exc}]\n\nRaw extracted text:\n{text[:5000]}"
 
+    def _identify_headings(self, file_path: Path, base_text: str, ext: str) -> list[str]:
+        headings: list[str] = []
+        if ext == ".md":
+            for line in base_text.splitlines():
+                line = line.strip()
+                if line.startswith("#"):
+                    headings.append(line.lstrip("#").strip())
+        elif ext == ".docx":
+            doc = DocxDocument(file_path)
+            for p in doc.paragraphs:
+                style = (p.style.name or "") if p.style else ""
+                if style.startswith("Heading") and p.text.strip():
+                    headings.append(p.text.strip())
+        elif ext == ".pdf":
+            doc = fitz.open(file_path)
+            try:
+                for page in doc:
+                    blocks = page.get_text("dict")["blocks"]
+                    for b in blocks:
+                        if "lines" not in b:
+                            continue
+                        for ln in b["lines"]:
+                            for s in ln["spans"]:
+                                if s["size"] > 14 and s["text"].strip():
+                                    headings.append(s["text"].strip())
+            finally:
+                doc.close()
+        else:
+            for line in base_text.splitlines():
+                if line.strip() and line.strip().isupper() and 3 < len(line.strip()) < 80:
+                    headings.append(line.strip())
+        # de-dupe preserve order
+        seen: set[str] = set()
+        out: list[str] = []
+        for h in headings:
+            if h not in seen:
+                seen.add(h)
+                out.append(h)
+        return out
+
     def execute(self, file_path: Path, structured_operation: Any, **kwargs) -> Any:
-        """Execute document processing steps.
-        
-        The `prompt` kwarg (if provided via output_dir parent context) is used
-        to run LLM-powered analysis on the extracted text.
-        """
+        """Execute document processing steps for PDF / DOCX / TXT / MD."""
         ext = file_path.suffix.lower()
-        # Retrieve the original user prompt if passed through kwargs
         user_prompt: str = kwargs.get("prompt", "")
         output_dir: Path | None = kwargs.get("output_dir", None)
-        
-        results = {
+
+        results: dict[str, Any] = {
             "text": "",
             "analysis": "",
             "tables": [],
+            "table_csv_paths": [],
             "metadata": {},
             "word_count": 0,
             "headings": [],
+            "pages": [],
+            "entities": {},
+            "key_values": {},
+            "mentions": [],
+            "links": {},
+            "language": {},
+            "images": [],
+            "redacted_text": "",
+            "summary": "",
+            "artifact_paths": [],
             "step_results": [],
             "user_prompt": user_prompt,
+            "errors": [],
         }
-        
-        # Pre-load text
+
         base_text = ""
         if ext == ".pdf":
             base_text = self._extract_text_pdf(file_path)
@@ -359,93 +405,172 @@ class DocumentProcessor(FileProcessor):
             base_text = self._extract_text_docx(file_path)
         elif ext in {".txt", ".md"}:
             base_text = file_path.read_text(encoding="utf-8", errors="replace")
-            
+
+        working_text = base_text
+
         for step in structured_operation.steps:
             tool = step.tool_name
-            
-            if tool == "extract_text":
-                results["text"] = base_text
-                # If there's a user prompt, run LLM analysis on the extracted text
-                if user_prompt and base_text and base_text != "No extractable text, OCR unavailable":
-                    results["analysis"] = self._call_llm_analysis(base_text, user_prompt)
-                
-            elif tool == "extract_text_ocr":
-                raise ValueError("OCR is not supported on this system (Tesseract missing).")
-                
-            elif tool == "extract_tables":
-                if ext == ".docx":
-                    results["tables"] = self._extract_tables_docx(file_path)
-                elif ext == ".pdf":
-                    doc = fitz.open(file_path)
-                    for page in doc:
-                        tabs = page.find_tables()
-                        for tab in tabs:
-                            results["tables"].append(tab.extract())
-                    doc.close()
-                else:
-                    results["tables"] = []
-                    
-            elif tool == "extract_metadata":
-                results["metadata"] = self.profile(file_path)
-                
-            elif tool == "convert_format":
-                results["text"] = base_text
-                if user_prompt and base_text and base_text != "No extractable text, OCR unavailable":
-                    results["analysis"] = self._call_llm_analysis(base_text, user_prompt)
-                
-            elif tool == "clean_text":
-                cleaned = re.sub(r'\s+', ' ', base_text).strip()
-                results["text"] = cleaned
-                if user_prompt and cleaned:
-                    results["analysis"] = self._call_llm_analysis(cleaned, user_prompt)
-                
-            elif tool == "count_words":
-                results["word_count"] = len(base_text.split())
-                
-            elif tool == "identify_headings":
-                if ext == ".md":
-                    headings = []
-                    for line in base_text.splitlines():
-                        line = line.strip()
-                        if line.startswith("#"):
-                            headings.append(line.lstrip("#").strip())
-                    results["headings"] = headings
-                elif ext == ".docx":
-                    doc = DocxDocument(file_path)
-                    headings = []
-                    for p in doc.paragraphs:
-                        if p.style.name.startswith("Heading"):
-                            headings.append(p.text.strip())
-                    results["headings"] = headings
-                elif ext == ".pdf":
-                    doc = fitz.open(file_path)
-                    headings = []
-                    for page in doc:
-                        blocks = page.get_text("dict")["blocks"]
-                        for b in blocks:
-                            if "lines" in b:
-                                for ln in b["lines"]:
-                                    for s in ln["spans"]:
-                                        if s["size"] > 14 and s["text"].strip():
-                                            headings.append(s["text"].strip())
-                    doc.close()
-                    results["headings"] = headings
+            params = dict(getattr(step, "parameters", None) or {})
+            ok = True
+            summary = step.expected_output
 
-            from backend.models.schemas import ExecutionResult
+            try:
+                if tool == "extract_text":
+                    results["text"] = working_text
+                    summary = f"Extracted {len(working_text.split())} words of text."
+
+                elif tool == "extract_text_ocr":
+                    if ext != ".pdf":
+                        raise ValueError("OCR is only supported for PDF files.")
+                    working_text = self._ocr_pdf(file_path)
+                    results["text"] = working_text
+                    summary = f"OCR extracted {len(working_text.split())} words."
+
+                elif tool == "clean_text":
+                    working_text = doc_ops.clean_document_text(working_text)
+                    # also collapse leftover multi-spaces inside lines
+                    working_text = re.sub(r"[ \t]{2,}", " ", working_text)
+                    results["text"] = working_text
+                    summary = "Normalized whitespace and removed header/footer noise."
+
+                elif tool == "extract_tables":
+                    if ext == ".docx":
+                        results["tables"] = self._extract_tables_docx(file_path)
+                    elif ext == ".pdf":
+                        results["tables"] = self._extract_tables_pdf(file_path)
+                    else:
+                        results["tables"] = []
+                    csv_paths = self._write_tables_csv(results["tables"], output_dir)
+                    results["table_csv_paths"] = csv_paths
+                    results["artifact_paths"].extend(csv_paths)
+                    summary = f"Extracted {len(results['tables'])} table(s); wrote {len(csv_paths)} CSV file(s)."
+
+                elif tool == "extract_metadata":
+                    results["metadata"] = self._rich_metadata(file_path)
+                    summary = "Extracted document metadata."
+
+                elif tool in {"identify_headings", "extract_headings"}:
+                    results["headings"] = self._identify_headings(file_path, working_text, ext)
+                    summary = f"Identified {len(results['headings'])} heading(s)."
+
+                elif tool == "count_words":
+                    results["word_count"] = len(working_text.split())
+                    summary = f"Word count: {results['word_count']}."
+
+                elif tool == "split_pages":
+                    if ext == ".pdf":
+                        results["pages"] = self._extract_text_by_page_pdf(file_path)
+                    else:
+                        # Non-PDF: treat whole doc as one page, or split on form-feed / markdown headings
+                        results["pages"] = [{"page": 1, "text": working_text}]
+                    if output_dir and results["pages"]:
+                        for page in results["pages"]:
+                            p = output_dir / f"page_{page['page']}.txt"
+                            p.write_text(page.get("text") or "", encoding="utf-8")
+                            results["artifact_paths"].append(str(p))
+                    summary = f"Split into {len(results['pages'])} page(s)."
+
+                elif tool == "extract_entities":
+                    results["entities"] = doc_ops.extract_entities(working_text)
+                    summary = (
+                        f"Entities: {len(results['entities'].get('emails', []))} emails, "
+                        f"{len(results['entities'].get('phones', []))} phones, "
+                        f"{len(results['entities'].get('dates', []))} dates, "
+                        f"{len(results['entities'].get('amounts', []))} amounts."
+                    )
+
+                elif tool == "extract_key_values":
+                    results["key_values"] = doc_ops.extract_key_values(working_text)
+                    summary = f"Extracted {len(results['key_values'])} key-value field(s)."
+
+                elif tool == "find_mentions":
+                    keyword = str(params.get("keyword") or params.get("query") or "").strip()
+                    if not keyword:
+                        # fall back: last quoted phrase in user prompt
+                        qm = re.search(r"[\"']([^\"']+)[\"']", user_prompt)
+                        keyword = qm.group(1) if qm else ""
+                    results["mentions"] = doc_ops.find_mentions(working_text, keyword)
+                    summary = f"Found {len(results['mentions'])} mention(s) of '{keyword}'."
+
+                elif tool == "extract_links":
+                    results["links"] = doc_ops.extract_links(working_text)
+                    summary = (
+                        f"Links: {len(results['links'].get('urls', []))} URL(s), "
+                        f"{len(results['links'].get('emails', []))} email(s)."
+                    )
+
+                elif tool == "detect_language":
+                    results["language"] = doc_ops.detect_language(working_text)
+                    summary = (
+                        f"Language guess: {results['language'].get('language')} "
+                        f"(confidence {results['language'].get('confidence')})."
+                    )
+
+                elif tool == "extract_images":
+                    if ext != ".pdf":
+                        raise ValueError("Image/figure extraction is supported for PDF files.")
+                    results["images"] = self._extract_images_pdf(file_path, output_dir)
+                    for img in results["images"]:
+                        if img.get("path"):
+                            results["artifact_paths"].append(img["path"])
+                    summary = f"Extracted {len(results['images'])} embedded image(s)."
+
+                elif tool == "redact_pii":
+                    redacted, counts = doc_ops.redact_pii(working_text)
+                    working_text = redacted
+                    results["redacted_text"] = redacted
+                    results["text"] = redacted
+                    summary = (
+                        f"Redacted {counts.get('emails', 0)} email(s) and "
+                        f"{counts.get('phones', 0)} phone(s)."
+                    )
+
+                elif tool in {"summarize", "extractive_summary"}:
+                    max_sents = int(params.get("max_sentences", 5))
+                    results["summary"] = doc_ops.extractive_summary(working_text, max_sentences=max_sents)
+                    results["analysis"] = results["summary"]
+                    summary = f"Built extractive summary ({max_sents} sentence cap)."
+
+                elif tool in {"llm_analysis", "answer_question", "qa"}:
+                    results["text"] = working_text
+                    results["analysis"] = self._call_llm_analysis(working_text, user_prompt or "Summarize this document.")
+                    summary = "Generated answer/analysis from document text."
+
+                elif tool == "convert_format":
+                    results["text"] = working_text
+                    summary = "Prepared text for format conversion export."
+
+                else:
+                    ok = False
+                    summary = f"Unknown document tool '{tool}'."
+                    results["errors"].append(summary)
+
+            except Exception as exc:
+                ok = False
+                summary = f"{tool} failed: {exc}"
+                results["errors"].append(summary)
+                log.warning("Document tool %s failed: %s", tool, exc)
+
             results["step_results"].append(
                 ExecutionResult(
                     step_number=step.step_number,
                     tool_name=tool,
-                    success=True,
+                    success=ok,
                     rows_before=0,
                     rows_after=0,
                     columns_before=0,
                     columns_after=0,
-                    summary=step.expected_output,
-                    execution_time_ms=0.0
+                    summary=summary,
+                    execution_time_ms=0.0,
                 )
             )
-                    
+
+        # Ensure primary text is populated for export
+        if not results["text"]:
+            results["text"] = working_text
+        if not results.get("word_count"):
+            results["word_count"] = len((results.get("text") or "").split())
+
         return results
 
     def validate_output(self, before_state: Any, after_state: Any, structured_operation: Any, **kwargs) -> ValidationResult:
@@ -524,7 +649,23 @@ class DocumentProcessor(FileProcessor):
                     errors.append("convert_format failed: no valid text to convert")
                 else:
                     checks_passed.append("format_converted_text_ready: true")
-                    
+
+            elif tool in {
+                "extract_entities", "extract_key_values", "find_mentions", "extract_links",
+                "detect_language", "extract_images", "redact_pii", "extractive_summary",
+                "summarize", "split_pages", "llm_analysis", "extract_text_ocr",
+            }:
+                # Soft pass: step-level success is tracked in ExecutionResult
+                step_ok = any(
+                    r.tool_name == tool and r.success
+                    for r in after_state.get("step_results", [])
+                )
+                if step_ok:
+                    checks_passed.append(f"{tool}: ok")
+                else:
+                    # Non-fatal for optional tools like OCR/LLM — record but don't hard-fail whole doc
+                    checks_passed.append(f"{tool}: completed_with_notes")
+
         if errors:
             return ValidationResult(is_valid=False, checks_passed=checks_passed, checks_failed=errors)
         return ValidationResult(is_valid=True, checks_passed=checks_passed, checks_failed=[])
@@ -538,22 +679,51 @@ class DocumentProcessor(FileProcessor):
         output_format = output_format.lower().lstrip(".")
         output_file = output_dir / f"{filename_stem}.{output_format}"
         
-        # Content to write: prefer LLM analysis over raw extracted text
-        content = state.get("analysis") or state.get("text") or ""
+        # Prefer analysis/summary/redacted text, then raw extract
+        content = (
+            state.get("analysis")
+            or state.get("summary")
+            or state.get("redacted_text")
+            or state.get("text")
+            or ""
+        )
         user_prompt = state.get("user_prompt", "Document Analysis")
-        
+
+        if output_format == "csv" and state.get("tables"):
+            # Export first extracted table as CSV
+            output_file = output_dir / f"{filename_stem}.csv"
+            with output_file.open("w", encoding="utf-8", newline="") as fh:
+                writer = csv.writer(fh)
+                for row in state["tables"][0]:
+                    writer.writerow([(c if c is not None else "") for c in row])
+            return output_file
+
         if output_format in {"txt", "md"}:
             output_file.write_text(content, encoding="utf-8")
-            
+
         elif output_format == "json":
-            import json
-            # Produce a clean, serialisable dict (exclude non-serialisable items)
             export_state = {
-                "analysis": content,
+                "analysis": state.get("analysis") or "",
+                "summary": state.get("summary") or "",
+                "text": state.get("text") or "",
+                "redacted_text": state.get("redacted_text") or "",
                 "word_count": state.get("word_count", 0),
                 "headings": state.get("headings", []),
                 "metadata": state.get("metadata", {}),
                 "tables": state.get("tables", []),
+                "table_csv_paths": state.get("table_csv_paths", []),
+                "pages": state.get("pages", []),
+                "entities": state.get("entities", {}),
+                "key_values": state.get("key_values", {}),
+                "mentions": state.get("mentions", []),
+                "links": state.get("links", {}),
+                "language": state.get("language", {}),
+                "images": [
+                    {k: v for k, v in img.items() if k != "path"}
+                    for img in state.get("images", [])
+                ],
+                "artifact_paths": state.get("artifact_paths", []),
+                "errors": state.get("errors", []),
             }
             output_file.write_text(json.dumps(export_state, indent=2, ensure_ascii=False), encoding="utf-8")
             

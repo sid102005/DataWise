@@ -2,6 +2,8 @@
 
 This guide provides tested, working prompt commands for each supported format processor.
 
+For a full how-to (start app, test files, every feature checklist), see **[`USAGE_GUIDE.md`](USAGE_GUIDE.md)**.
+
 ---
 
 ## 1. Image Processor (JPEG, PNG, GIF, BMP, WEBP, TIFF)

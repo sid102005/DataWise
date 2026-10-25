@@ -91,11 +91,18 @@ def test_profile_scanned_pdf(doc_proc):
     assert profile["has_text_layer"] == False
 
 def test_ocr_not_supported(doc_proc):
+    """OCR fails softly when Tesseract/pytesseract is unavailable (recorded on the step)."""
     file_path = FIXTURES_DIR / "sample_scanned.pdf"
     plan = create_plan("extract_text_ocr")
-    with pytest.raises(ValueError) as exc:
-        doc_proc.execute(file_path, plan)
-    assert "OCR is not supported" in str(exc.value)
+    result = doc_proc.execute(file_path, plan)
+    assert result["step_results"], "expected at least one step result"
+    step = result["step_results"][0]
+    # Either OCR succeeded (Tesseract present) or failed with a clear message
+    if not step.success:
+        assert "OCR" in step.summary or "ocr" in step.summary.lower()
+        assert result.get("errors")
+    else:
+        assert result.get("text")
 
 def test_validation_failure_scanned_pdf_extract_text(doc_proc):
     # This proves validation catches a failure. 

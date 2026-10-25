@@ -54,8 +54,12 @@ _KEYWORD_MAP: list[tuple[re.Pattern[str], ObjectiveCategory]] = [
     (re.compile(r"\b(filter|where|only|exclude|keep|remove row)\b", re.I), ObjectiveCategory.TRANSFORM),
     (re.compile(r"\b(rename|reorder|add column|derive|calculate|compute|select column|display column)\b", re.I), ObjectiveCategory.TRANSFORM),
     (re.compile(r"\b(correlat\w*|distribut\w*|stat\w*|mean|median|std|outlier\w*)\b", re.I), ObjectiveCategory.STAT),
-    (re.compile(r"\b(extract|pull|find|list|show me)\b", re.I), ObjectiveCategory.EXTRACT),
-    (re.compile(r"\b(report|summary|summariz\w*|overview)\b", re.I), ObjectiveCategory.REPORT),
+    (re.compile(
+        r"\b(extract|pull|find|list|show me|ocr|heading|outline|table|tables|"
+        r"metadata|entity|entities|invoice|redact|pii|mention|language|page)\b",
+        re.I,
+    ), ObjectiveCategory.EXTRACT),
+    (re.compile(r"\b(report|summary|summariz\w*|overview|tldr|abstract)\b", re.I), ObjectiveCategory.REPORT),
     (re.compile(r"\b(compare|versus|vs\.?|difference|change)\b", re.I), ObjectiveCategory.COMPARE),
 ]
 

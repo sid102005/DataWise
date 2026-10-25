@@ -819,6 +819,131 @@ def _steps_for_archive(
     ]
 
 
+def _steps_for_document(
+    objectives: list[Objective],
+    profile: DataProfile,
+    step_offset: int,
+) -> list[Step]:
+    """Plan document extraction / cleaning steps from the user prompt text."""
+    steps: list[Step] = []
+    n = step_offset
+    full_text = " ".join(o.description for o in objectives).lower()
+
+    def add(tool: str, description: str, params: dict | None = None, expected: str | None = None) -> None:
+        nonlocal n
+        n += 1
+        steps.append(Step(
+            step_number=n,
+            tool_name=tool,
+            description=description,
+            parameters=params or {},
+            expected_output=expected or description,
+        ))
+
+    # OCR for scanned PDFs
+    if any(k in full_text for k in ["ocr", "scanned", "scan this"]):
+        add("extract_text_ocr", "OCR scanned PDF pages into text.")
+
+    # Core text extract if any text/summary/qa/entity style request, or default later
+    wants_text = any(k in full_text for k in [
+        "extract text", "get text", "read", "clean text", "normalize",
+        "summar", "question", "answer", "qa", "ask", "what is", "explain",
+        "entity", "email", "phone", "invoice", "key value", "key-value",
+        "mention", "find all", "link", "url", "language", "redact", "pii",
+        "convert", "word count", "count word",
+    ])
+
+    if wants_text and not any(k in full_text for k in ["ocr", "scanned", "scan this"]):
+        add("extract_text", "Extract text from document.")
+
+    if any(k in full_text for k in ["clean text", "normalize", "clean this document", "clean the document", "clean document"]):
+        if not any(s.tool_name == "extract_text" for s in steps) and not any(s.tool_name == "extract_text_ocr" for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("clean_text", "Normalize whitespace and remove header/footer noise.")
+
+    if any(k in full_text for k in ["table", "tables", "spreadsheet from"]):
+        add("extract_tables", "Extract tables and export each as CSV.")
+
+    if any(k in full_text for k in ["metadata", "properties", "page count", "author", "title of"]):
+        add("extract_metadata", "Extract document metadata.")
+
+    if any(k in full_text for k in ["heading", "outline", "table of contents", "toc"]):
+        add("extract_headings", "Identify document headings / outline.")
+
+    if any(k in full_text for k in ["word count", "count word", "how many words"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("count_words", "Count words in the document.")
+
+    if any(k in full_text for k in ["split page", "by page", "page by page", "per page"]):
+        add("split_pages", "Split document text by page.")
+
+    if any(k in full_text for k in ["entity", "entities", "email", "phone", "phone number", "amount", "dates in"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("extract_entities", "Extract emails, phones, dates, amounts, and URLs.")
+
+    if any(k in full_text for k in ["key value", "key-value", "invoice", "form field", "fields", "label:"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("extract_key_values", "Extract label/value fields from the document.")
+
+    if any(k in full_text for k in ["mention", "find all", "find mentions", "occurrences of", "search for"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        keyword = ""
+        joined = " ".join(o.description for o in objectives)
+        qm = re.search(r"[\"']([^\"']+)[\"']", joined)
+        if qm:
+            keyword = qm.group(1)
+        else:
+            m = re.search(r"(?:mentions? of|find all|search for|occurrences of)\s+([A-Za-z0-9_\-]+)", joined, re.I)
+            if m:
+                keyword = m.group(1)
+        add("find_mentions", f"Find mentions of '{keyword or 'keyword'}'.", {"keyword": keyword})
+
+    if any(k in full_text for k in ["link", "url", "urls", "hyperlink", "doi"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("extract_links", "Extract URLs and email references.")
+
+    if any(k in full_text for k in ["language", "what language", "detect language"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("detect_language", "Detect document language.")
+
+    if any(k in full_text for k in ["image", "images", "figure", "figures", "extract figure"]):
+        add("extract_images", "Extract embedded images/figures from PDF.")
+
+    if any(k in full_text for k in ["redact", "pii", "mask email", "mask phone", "anonymize"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("redact_pii", "Redact emails and phone numbers.")
+
+    if any(k in full_text for k in ["summar", "tldr", "overview", "abstract"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("extractive_summary", "Build an extractive summary of the document.")
+
+    if any(k in full_text for k in ["question", "answer", "qa", "ask", "what is", "explain", "tell me"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("llm_analysis", "Answer the user question using document text (LLM if configured).")
+
+    if any(k in full_text for k in ["convert to", "export as", "as markdown", "as txt", "as docx"]):
+        if not any(s.tool_name in {"extract_text", "extract_text_ocr", "clean_text"} for s in steps):
+            add("extract_text", "Extract text from document.")
+        add("convert_format", "Prepare text for format conversion export.")
+
+    # Default for vague document prompts: extract + clean text
+    if not steps:
+        add("extract_text", "Extract text from document.")
+        add("clean_text", "Normalize extracted text.")
+        add("extract_metadata", "Extract document metadata.")
+
+    return steps
+
+
 def _build_heuristic_plan(
     objectives: list[Objective],
     profile: DataProfile,
@@ -827,6 +952,22 @@ def _build_heuristic_plan(
     revision_count: int = 0,
 ) -> Plan:
     """Build a complete Plan from objectives using DataProfile metadata."""
+    DOCUMENT_FORMATS = {"pdf", "docx", "txt", "md"}
+    if profile.file_format in DOCUMENT_FORMATS:
+        doc_steps = _steps_for_document(objectives, profile, 0)
+        rationale = (
+            f"Heuristic plan for document ({profile.file_format.upper()}): "
+            + ", ".join(s.tool_name for s in doc_steps)
+        )
+        return Plan(
+            plan_id=plan_id,
+            session_id=session_id,
+            objectives=objectives,
+            steps=doc_steps,
+            rationale=rationale,
+            revision_count=revision_count,
+        )
+
     IMAGE_FORMATS = {"jpg", "jpeg", "png", "gif", "bmp", "webp", "tiff", "tif"}
     if profile.file_format in IMAGE_FORMATS:
         image_steps = _steps_for_image(objectives, profile, 0)
@@ -938,7 +1079,12 @@ _ALLOWED_TOOL_NAMES = frozenset({
     "groupby_aggregate", "sort_values", "top_n",
     "bar_chart", "line_chart", "pie_chart",
     # Document
-    "extract_text", "clean_text", "count_words", "extract_headings", "extract_tables", "llm_analysis",
+    "extract_text", "extract_text_ocr", "clean_text", "count_words",
+    "extract_headings", "identify_headings", "extract_tables", "extract_metadata",
+    "split_pages", "extract_entities", "extract_key_values", "find_mentions",
+    "extract_links", "detect_language", "extract_images", "redact_pii",
+    "extractive_summary", "summarize", "llm_analysis", "answer_question", "qa",
+    "convert_format",
     # Image
     "resize", "crop", "rotate", "convert_format", "compress",
     # Audio

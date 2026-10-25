@@ -7,10 +7,32 @@
     "document": {
       "supported": true,
       "planned_in_phase": 10,
+      "operations": [
+        "extract_text",
+        "extract_text_ocr",
+        "clean_text",
+        "count_words",
+        "extract_metadata",
+        "extract_headings",
+        "extract_tables",
+        "split_pages",
+        "extract_entities",
+        "extract_key_values",
+        "find_mentions",
+        "extract_links",
+        "detect_language",
+        "extract_images",
+        "redact_pii",
+        "extractive_summary",
+        "llm_analysis",
+        "convert_format"
+      ],
+      "formats": ["pdf", "docx", "txt", "md"],
       "limitations": {
-        "ocr": "Not supported - Tesseract binary missing",
-        "summarization": "Deferred to future phase for validation reasons",
-        "legacy_doc": "Detected but rejected (binary/macros not supported)"
+        "ocr": "Optional — requires Tesseract binary + pytesseract",
+        "llm_qa": "Optional — requires ANTHROPIC_API_KEY or GEMINI_API_KEY; falls back to raw text",
+        "legacy_doc": "Detected but rejected (binary/macros not supported)",
+        "pptx": "Presentation processor planned separately"
       }
     },
     "image": {

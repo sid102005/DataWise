@@ -1,0 +1,13 @@
+DataWise Sample Report
+
+Invoice No: INV-2024-778
+Customer: Alice Smith
+Email: alice.smith@example.com
+Phone: +1-555-010-2299
+Amount: $1,250.00
+Date: 2024-03-15
+Website: https://example.com/orders/778
+
+This report contains sample customer notes for testing document extraction.
+Revenue increased in March. Please find all mentions of Revenue carefully.
+Contact support at help@datawise.local if needed.

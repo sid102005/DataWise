@@ -164,8 +164,8 @@ def test_standardize_dates_column_validation_rejection(sample_df):
 
 def test_clean_for_ml_on_messy_fixture():
     """clean_for_ml prepares the test_files messy CSV for ML use."""
-    messy_path = REPO_ROOT / "test_files" / "messy_customers.csv"
-    assert messy_path.exists(), "test_files/messy_customers.csv must exist"
+    messy_path = REPO_ROOT / "test_files" / "tabular" / "messy_customers.csv"
+    assert messy_path.exists(), "test_files/tabular/messy_customers.csv must exist"
     messy = pd.read_csv(messy_path)
     cleaned, report = clean_for_ml(messy)
 
